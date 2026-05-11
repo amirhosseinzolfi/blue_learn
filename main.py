@@ -10,9 +10,49 @@ from dotenv import load_dotenv, set_key
 
 import models, database, agents
 import sqlalchemy
+from sqlalchemy import text
 from pydantic import BaseModel
 from logger import logger
 
+# --- Database Migrations ---
+def run_migrations():
+    logger.log_info("Running database migrations...")
+    engine = database.engine
+    with engine.connect() as conn:
+        # Add study_time column to outline_items if it doesn't exist
+        try:
+            conn.execute(text("ALTER TABLE outline_items ADD COLUMN study_time INTEGER DEFAULT 0"))
+            conn.commit()
+            logger.log_success("Added study_time column to outline_items table")
+        except Exception:
+            pass # Column already exists
+
+        # Create daily_activity table if it doesn't exist
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS daily_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date VARCHAR(255),
+                study_time INTEGER DEFAULT 0
+            )
+        """))
+        try:
+            conn.execute(text("CREATE INDEX ix_daily_activity_date ON daily_activity (date)"))
+        except Exception:
+            pass
+
+        # Create knowledge_insights table if it doesn't exist
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS knowledge_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT,
+                created_at VARCHAR(255)
+            )
+        """))
+
+        conn.commit()
+    logger.log_success("Database migrations complete")
+
+run_migrations()
 models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI()
