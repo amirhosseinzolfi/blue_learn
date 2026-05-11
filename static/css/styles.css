@@ -1,0 +1,73 @@
+body {
+    margin: 0;
+    font-family: 'Vazirmatn', 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #110f17;
+    color: #f8fafc;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Base Prose Styles */
+.prose {
+    text-align: right;
+    line-height: 1.8;
+}
+
+/* LTR Support */
+.ltr-content {
+    direction: ltr !important;
+    text-align: left !important;
+    font-family: 'Inter', system-ui, sans-serif !important;
+}
+
+.ltr-content .prose {
+    text-align: left !important;
+}
+
+.ltr-content h1, 
+.ltr-content h2, 
+.ltr-content h3, 
+.ltr-content h4, 
+.ltr-content h5, 
+.ltr-content h6 {
+    font-family: 'Outfit', sans-serif !important;
+    letter-spacing: -0.02em;
+}
+
+.prose pre {
+    text-align: left;
+    direction: ltr;
+    font-family: 'Fira Code', 'Cascadia Code', monospace;
+}
+
+/* Custom minimal scrollbar — hidden by default, visible on hover */
+::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 4px;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+    background: rgba(168, 85, 247, 0.25);
+}
+
+*:hover::-webkit-scrollbar-thumb:hover {
+    background: rgba(168, 85, 247, 0.45);
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+*:hover {
+    scrollbar-color: rgba(168, 85, 247, 0.2) transparent;
+}
