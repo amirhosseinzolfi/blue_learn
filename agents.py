@@ -315,3 +315,29 @@ def chat_coach_stream(messages: List[dict], course_title: str, course_descriptio
         
     logger.log_process_end("AI Coach Stream", time.time() - start_time)
 
+def generate_knowledge_insight(completed_sessions: List[dict]) -> str:
+    """
+    Analyzes completed sessions and generates a motivational knowledge insight.
+    """
+    if not completed_sessions:
+        return "You haven't completed any sessions yet. Start your learning journey to see your insights here! 🚀"
+
+    sessions_info = "\n".join([f"- Course: {s['course_title']}, Session: {s['item_title']}" for s in completed_sessions])
+
+    logger.log_process_start("Knowledge Insight Generation", f"Generating insight for {len(completed_sessions)} sessions")
+    start_time = time.time()
+
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", prompts.KNOWLEDGE_INSIGHT_PROMPT),
+        ("human", "Please analyze my progress and give me my knowledge insight."),
+    ])
+
+    chain = prompt_template | get_content_llm()
+    result = chain.invoke({"completed_sessions_info": sessions_info})
+
+    content = result.content
+    if isinstance(content, list):
+        content = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in content])
+
+    logger.log_process_end("Knowledge Insight Generation", time.time() - start_time)
+    return content

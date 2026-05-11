@@ -40,5 +40,13 @@ class OutlineItem(Base):
     order = Column(Integer)
     is_completed = Column(Boolean, default=False)
     content = Column(Text, nullable=True)
+    study_time = Column(Integer, default=0) # in seconds
 
     course = relationship("Course", back_populates="items")
+
+class KnowledgeInsight(Base):
+    __tablename__ = "knowledge_insights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text)
+    created_at = Column(String) # For simplicity using string, but could be DateTime

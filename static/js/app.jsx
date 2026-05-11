@@ -34,6 +34,9 @@ function App() {
     const [courses, setCourses] = useState([]);
     const [currentView, setCurrentView] = useState('courses');
     const [dailyMicroCourses, setDailyMicroCourses] = useState([]);
+    const [stats, setStats] = useState({ total_courses: 0, completed_courses: 0, total_sessions: 0, total_completed_sessions: 0, total_study_time: 0, recent_completed: [] });
+    const [insights, setInsights] = useState([]);
+    const [isInsightLoading, setIsInsightLoading] = useState(false);
     const [settings, setSettings] = useState({ google_api_key: '', model_name: '' });
     const [settingsSaved, setSettingsSaved] = useState(false);
     const [selectedCourse, setSelectedCourse] = useState(null);
@@ -72,6 +75,7 @@ function App() {
     });
     const [isMicroSettingsOpen, setIsMicroSettingsOpen] = useState(false);
     const [isDailyLoading, setIsDailyLoading] = useState(false);
+    const [studyTimer, setStudyTimer] = useState(0);
     const [toast, setToast] = useState(null);
 
     const showToast = (message, type = 'success') => {
@@ -120,6 +124,8 @@ function App() {
     // Initial Load & Outside Clicks
     useEffect(() => {
         fetchCourses();
+        fetchStats();
+        fetchInsights();
         
         const todayKey = new Date().toISOString().split('T')[0];
         const storageKey = `daily_courses_${todayKey}`;
@@ -144,12 +150,29 @@ function App() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Item Viewing Effects
+    // Ref for syncing study time on unmount
+    const lastSyncedTimeRef = useRef(0);
+    const studyTimerRef = useRef(0);
+
+    // Item Viewing Effects & Study Timer
     useEffect(() => {
         if (viewingItem && contentRef.current) {
             window.scrollTo({ top: contentRef.current.offsetTop - 20, behavior: 'smooth' });
         }
-        if (viewingItem) {
+
+        let interval;
+        if (viewingItem && !isCoachMode) {
+            setStudyTimer(0);
+            studyTimerRef.current = 0;
+            lastSyncedTimeRef.current = 0;
+            interval = setInterval(() => {
+                setStudyTimer(prev => {
+                    const next = prev + 1;
+                    studyTimerRef.current = next;
+                    return next;
+                });
+            }, 1000);
+
             setIsCoachMode(false);
             if (viewingItem.chapter) {
                 setOpenChapters(prev => ({ ...prev, [viewingItem.chapter]: true }));
@@ -159,7 +182,39 @@ function App() {
                 localStorage.setItem(`last_session_${selectedCourse.id}`, viewingItem.id);
             }
         }
-    }, [viewingItem]);
+
+        return () => {
+            if (interval) {
+                clearInterval(interval);
+                // Sync remaining time on unmount or view change
+                const unsyncedSeconds = studyTimerRef.current - lastSyncedTimeRef.current;
+                if (unsyncedSeconds > 0) {
+                    syncStudyTime(unsyncedSeconds, viewingItem.id);
+                }
+            }
+        };
+    }, [viewingItem, isCoachMode]);
+
+    // Periodically sync study time (every 30 seconds)
+    useEffect(() => {
+        if (viewingItem && studyTimer > 0 && studyTimer % 30 === 0) {
+            const unsyncedSeconds = studyTimer - lastSyncedTimeRef.current;
+            if (unsyncedSeconds > 0) {
+                syncStudyTime(unsyncedSeconds);
+                lastSyncedTimeRef.current = studyTimer;
+            }
+        }
+    }, [studyTimer]);
+
+    const syncStudyTime = async (seconds, itemId = null) => {
+        const id = itemId || (viewingItem ? viewingItem.id : null);
+        if (!id || seconds <= 0) return;
+        try {
+            await axios.post(`${API_BASE}/items/${id}/study-time`, { seconds });
+        } catch (err) {
+            console.error("Error syncing study time", err);
+        }
+    };
 
     // Sync daily micro courses with courses completion status
     useEffect(() => {
@@ -208,6 +263,38 @@ function App() {
             setCourses(res.data);
         } catch (err) {
             console.error("Error fetching courses", err);
+        }
+    };
+
+    const fetchStats = async () => {
+        try {
+            const res = await axios.get(`${API_BASE}/stats`);
+            setStats(res.data);
+        } catch (err) {
+            console.error("Error fetching stats", err);
+        }
+    };
+
+    const fetchInsights = async () => {
+        try {
+            const res = await axios.get(`${API_BASE}/insights`);
+            setInsights(res.data);
+        } catch (err) {
+            console.error("Error fetching insights", err);
+        }
+    };
+
+    const generateInsight = async () => {
+        setIsInsightLoading(true);
+        try {
+            const res = await axios.post(`${API_BASE}/generate-insight`);
+            setInsights(prev => [res.data, ...prev]);
+            showToast('بینش جدید با موفقیت ایجاد شد!');
+        } catch (err) {
+            console.error("Error generating insight", err);
+            showToast('خطا در ایجاد بینش جدید', 'error');
+        } finally {
+            setIsInsightLoading(false);
         }
     };
 
@@ -559,12 +646,19 @@ function App() {
 
     const completeItem = async (itemId) => {
         try {
+            // Final sync of study time
+            const unsyncedSeconds = studyTimer - lastSyncedTimeRef.current;
+            if (unsyncedSeconds > 0) {
+                await syncStudyTime(unsyncedSeconds, itemId);
+                lastSyncedTimeRef.current = studyTimer;
+            }
             await axios.post(`${API_BASE}/items/${itemId}/complete`);
             if (viewingItem && viewingItem.id === itemId) {
                 setViewingItem({ ...viewingItem, is_completed: true });
                 showToast('تبریک! این درس با موفقیت به پایان رسید.');
             }
             selectCourse(selectedCourse.id, true);
+            fetchStats();
             setDailyMicroCourses(prev => {
                 const updated = prev.map(item => item.item_id === itemId ? { ...item, is_completed: true } : item);
                 const todayKey = new Date().toISOString().split('T')[0];
@@ -585,6 +679,16 @@ function App() {
     };
 
     // --- Helper Calculations ---
+    const formatTime = (seconds) => {
+        const totalSeconds = parseInt(seconds) || 0;
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
+        const s = totalSeconds % 60;
+        if (h > 0) return `${h} ساعت و ${m} دقیقه`;
+        if (m > 0) return `${m} دقیقه و ${s} ثانیه`;
+        return `${s} ثانیه`;
+    };
+
     const currentIndex = (selectedCourse && viewingItem) ? selectedCourse.items.findIndex(i => i.id === viewingItem.id) : -1;
     const prevItem = currentIndex > 0 ? selectedCourse.items[currentIndex - 1] : null;
     const nextItem = (currentIndex !== -1 && currentIndex < selectedCourse.items.length - 1) ? selectedCourse.items[currentIndex + 1] : null;
@@ -630,6 +734,7 @@ function App() {
                         {[
                             { view: 'courses',  icon: Layout,   label: 'دوره\u200cها' },
                             { view: 'micro',    icon: Zap,      label: 'میکرو دوره\u200cها' },
+                            { view: 'progress', icon: BarChart, label: 'پیشرفت' },
                             { view: 'settings', icon: Settings, label: 'تنظیمات' },
                         ].map(({ view, icon: Icon, label }) => (
                             <button
@@ -687,6 +792,7 @@ function App() {
                         {[
                             { view: 'courses',  icon: Layout },
                             { view: 'micro',    icon: Zap },
+                            { view: 'progress', icon: BarChart },
                             { view: 'settings', icon: Settings },
                         ].map(({ view, icon: Icon }) => (
                             <button
@@ -1414,6 +1520,129 @@ function App() {
                                     </button>
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {currentView === 'progress' && (
+                        <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                            <h2 className="text-3xl font-bold flex items-center gap-3 text-white">
+                                <BarChart className="text-primary" size={32} /> مسیر یادگیری و پیشرفت شما
+                            </h2>
+
+                            {/* Stats Overview */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                {[
+                                        { label: 'زمان کل مطالعه', value: formatTime(stats.total_study_time), icon: Clock, color: 'purple', classes: 'bg-purple-500/15 border-purple-500/20 text-purple-500', glow: 'bg-purple-500/10' },
+                                        { label: 'جلسات تکمیل شده', value: `${stats.total_completed_sessions} از ${stats.total_sessions}`, icon: CheckCircle, color: 'emerald', classes: 'bg-emerald-500/15 border-emerald-500/20 text-emerald-500', glow: 'bg-emerald-500/10' },
+                                        { label: 'دوره‌های به اتمام رسیده', value: `${stats.completed_courses} از ${stats.total_courses}`, icon: Trophy, color: 'amber', classes: 'bg-amber-500/15 border-amber-500/20 text-amber-500', glow: 'bg-amber-500/10' },
+                                        { label: 'تسلط کلی', value: `${stats.total_sessions ? Math.round((stats.total_completed_sessions / stats.total_sessions) * 100) : 0}%`, icon: Zap, color: 'blue', classes: 'bg-blue-500/15 border-blue-500/20 text-blue-500', glow: 'bg-blue-500/10' },
+                                ].map((stat, i) => (
+                                    <div key={i} className="bg-dark-lighter border border-white/[0.05] p-6 rounded-[2rem] shadow-xl relative overflow-hidden group">
+                                            <div className={`absolute -right-4 -top-4 w-24 h-24 ${stat.glow} rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700`}></div>
+                                        <div className="relative z-10">
+                                                <div className={`w-12 h-12 rounded-2xl ${stat.classes} border flex items-center justify-center mb-4`}>
+                                                <stat.icon size={24} />
+                                            </div>
+                                            <p className="text-slate-400 text-sm font-medium mb-1">{stat.label}</p>
+                                            <p className="text-xl font-bold text-white tracking-tight">{stat.value}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                {/* Knowledge Insights Section */}
+                                <div className="lg:col-span-2 flex flex-col gap-6">
+                                    <div className="bg-dark-lighter border border-purple-500/20 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-500"></div>
+
+                                        <div className="flex justify-between items-center mb-8">
+                                            <div>
+                                                <h3 className="text-xl font-bold text-white flex items-center gap-3">
+                                                    <Sparkles size={22} className="text-primary animate-pulse" /> تحلیل هوشمند دانش شما
+                                                </h3>
+                                                <p className="text-slate-400 text-xs mt-1">بر اساس جلسات و دوره‌هایی که تا کنون گذرانده‌اید</p>
+                                            </div>
+                                            <button
+                                                onClick={generateInsight}
+                                                disabled={isInsightLoading || stats.total_completed_sessions === 0}
+                                                className="bg-primary/20 hover:bg-primary text-primary hover:text-white border border-primary/30 px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group"
+                                            >
+                                                {isInsightLoading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} className="group-hover:rotate-180 transition-transform duration-500" />}
+                                                تحلیل مجدد
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-8 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                                            {insights.length > 0 ? (
+                                                insights.map((insight, idx) => (
+                                                    <div key={insight.id} className={`relative pb-8 ${idx !== insights.length - 1 ? 'border-b border-white/[0.05]' : ''}`}>
+                                                        <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-4 font-mono">
+                                                            <Clock size={12} /> {new Date(insight.created_at).toLocaleDateString('fa-IR')} - {new Date(insight.created_at).toLocaleTimeString('fa-IR')}
+                                                        </div>
+                                                        <div
+                                                            className="prose prose-invert prose-sm max-w-none prose-p:text-slate-300 prose-headings:text-white prose-strong:text-primary leading-relaxed"
+                                                            dangerouslySetInnerHTML={{ __html: marked.parse(insight.content) }}
+                                                        />
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="text-center py-20 bg-white/[0.02] rounded-[2rem] border border-dashed border-white/10">
+                                                    <Bot size={48} className="mx-auto text-slate-600 mb-4 opacity-50" />
+                                                    <p className="text-slate-400">هنوز هیچ بینشی تولید نشده است. برای دریافت تحلیل هوشمند روی دکمه بالا کلیک کنید.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Recent Activity & Gamification */}
+                                <div className="flex flex-col gap-6">
+                                    <div className="bg-dark-lighter border border-white/[0.05] rounded-[2.5rem] p-8 shadow-2xl">
+                                        <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                                            <Trophy size={22} className="text-amber-500" /> جلسات اخیر
+                                        </h3>
+                                        <div className="space-y-4">
+                                            {stats.recent_completed.length > 0 ? (
+                                                [...stats.recent_completed].reverse().map((item, i) => (
+                                                    <div key={i} className="flex items-start gap-4 p-4 bg-white/[0.03] rounded-2xl border border-white/[0.05] hover:bg-white/[0.05] transition-all group">
+                                                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 group-hover:scale-110 transition-transform">
+                                                            <CheckCircle size={20} />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <h4 className="text-sm font-bold text-slate-200 truncate">{item.title}</h4>
+                                                            <p className="text-[10px] text-slate-500 mt-0.5 truncate flex justify-between items-center">
+                                                                <span>{item.course_title}</span>
+                                                                <span className="bg-white/5 px-1.5 py-0.5 rounded text-[9px] font-mono">{formatTime(item.study_time)}</span>
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="text-center py-10 text-slate-500 text-sm italic">
+                                                    هنوز هیچ جلسه‌ای تکمیل نشده است.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-gradient-to-br from-primary/20 to-indigo-600/20 border border-primary/30 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
+                                        <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-primary/20 rounded-full blur-3xl"></div>
+                                        <h3 className="text-xl font-bold text-white mb-4 relative z-10">سطح یادگیری شما</h3>
+                                        <div className="flex items-end gap-2 mb-6 relative z-10">
+                                            <span className="text-5xl font-black text-white">Lvl {Math.floor(stats.total_study_time / 3600) + 1}</span>
+                                            <span className="text-primary font-bold mb-2">Master</span>
+                                        </div>
+                                        <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden mb-2 relative z-10">
+                                            <div
+                                                className="bg-primary h-full transition-all duration-1000"
+                                                style={{ width: `${(stats.total_study_time % 3600) / 36}%` }}
+                                            ></div>
+                                        </div>
+                                        <p className="text-slate-400 text-[10px] relative z-10">{(3600 - (stats.total_study_time % 3600)) / 60 < 1 ? 'کمتر از یک دقیقه' : Math.floor((3600 - (stats.total_study_time % 3600)) / 60) + ' دقیقه'} تا سطح بعدی</p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
 

@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv, set_key
 
 import models, database, agents
+import sqlalchemy
 from pydantic import BaseModel
 from logger import logger
 
@@ -417,6 +418,83 @@ def complete_item(item_id: int, db: Session = Depends(database.get_db)):
     db.commit()
     logger.log_success(f"Item {item_id} marked as complete")
     return {"status": "success"}
+
+class StudyTimeUpdate(BaseModel):
+    seconds: int
+
+@app.post("/items/{item_id}/study-time")
+def update_study_time(item_id: int, data: StudyTimeUpdate, db: Session = Depends(database.get_db)):
+    item = db.query(models.OutlineItem).filter(models.OutlineItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item.study_time += data.seconds
+    db.commit()
+    return {"status": "success", "total_study_time": item.study_time}
+
+@app.get("/stats")
+def get_stats(db: Session = Depends(database.get_db)):
+    total_courses = db.query(models.Course).count()
+    completed_items = db.query(models.OutlineItem).filter(models.OutlineItem.is_completed == True).all()
+
+    total_sessions = db.query(models.OutlineItem).count()
+    total_completed_sessions = len(completed_items)
+
+    total_study_time = db.query(sqlalchemy.func.sum(models.OutlineItem.study_time)).scalar() or 0
+
+    # Calculate completed courses
+    all_courses = db.query(models.Course).all()
+    completed_courses_count = 0
+    for course in all_courses:
+        if course.items and all(item.is_completed for item in course.items):
+            completed_courses_count += 1
+
+    # Recent completed sessions
+    recent_completed = []
+    for item in completed_items[-10:]: # Last 10
+        recent_completed.append({
+            "id": item.id,
+            "title": item.title,
+            "course_title": item.course.title,
+            "study_time": item.study_time,
+            "completed_at": None # We don't have a completed_at timestamp yet, maybe add it later
+        })
+
+    return {
+        "total_courses": total_courses,
+        "completed_courses": completed_courses_count,
+        "total_sessions": total_sessions,
+        "total_completed_sessions": total_completed_sessions,
+        "total_study_time": total_study_time,
+        "recent_completed": recent_completed
+    }
+
+@app.post("/generate-insight")
+def generate_insight(db: Session = Depends(database.get_db)):
+    completed_items = db.query(models.OutlineItem).filter(models.OutlineItem.is_completed == True).all()
+
+    completed_sessions_data = [
+        {"course_title": item.course.title, "item_title": item.title}
+        for item in completed_items
+    ]
+
+    insight_content = agents.generate_knowledge_insight(completed_sessions_data)
+
+    from datetime import datetime
+    new_insight = models.KnowledgeInsight(
+        content=insight_content,
+        created_at=datetime.now().isoformat()
+    )
+    db.add(new_insight)
+    db.commit()
+    db.refresh(new_insight)
+
+    return new_insight
+
+@app.get("/insights")
+def get_insights(db: Session = Depends(database.get_db)):
+    insights = db.query(models.KnowledgeInsight).order_by(models.KnowledgeInsight.id.desc()).all()
+    return insights
 
 @app.post("/items/{item_id}/generate")
 def generate_specific_micro(item_id: int, db: Session = Depends(database.get_db)):
