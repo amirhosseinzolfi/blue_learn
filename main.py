@@ -429,6 +429,17 @@ def update_study_time(item_id: int, data: StudyTimeUpdate, db: Session = Depends
         raise HTTPException(status_code=404, detail="Item not found")
 
     item.study_time += data.seconds
+
+    # Update Daily Activity
+    from datetime import date
+    today = date.today().isoformat()
+    daily = db.query(models.DailyActivity).filter(models.DailyActivity.date == today).first()
+    if not daily:
+        daily = models.DailyActivity(date=today, study_time=data.seconds)
+        db.add(daily)
+    else:
+        daily.study_time += data.seconds
+
     db.commit()
     return {"status": "success", "total_study_time": item.study_time}
 
@@ -460,13 +471,25 @@ def get_stats(db: Session = Depends(database.get_db)):
             "completed_at": None # We don't have a completed_at timestamp yet, maybe add it later
         })
 
+    # Activity Data (Last 7 days)
+    from datetime import date, timedelta
+    activity_data = []
+    for i in range(6, -1, -1):
+        d = (date.today() - timedelta(days=i)).isoformat()
+        daily = db.query(models.DailyActivity).filter(models.DailyActivity.date == d).first()
+        activity_data.append({
+            "date": d,
+            "minutes": (daily.study_time // 60) if daily else 0
+        })
+
     return {
         "total_courses": total_courses,
         "completed_courses": completed_courses_count,
         "total_sessions": total_sessions,
         "total_completed_sessions": total_completed_sessions,
         "total_study_time": total_study_time,
-        "recent_completed": recent_completed
+        "recent_completed": recent_completed,
+        "activity_data": activity_data
     }
 
 @app.post("/generate-insight")

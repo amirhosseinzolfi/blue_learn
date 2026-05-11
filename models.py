@@ -44,6 +44,13 @@ class OutlineItem(Base):
 
     course = relationship("Course", back_populates="items")
 
+class DailyActivity(Base):
+    __tablename__ = "daily_activity"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(String, index=True) # YYYY-MM-DD
+    study_time = Column(Integer, default=0) # in seconds
+
 class KnowledgeInsight(Base):
     __tablename__ = "knowledge_insights"
 

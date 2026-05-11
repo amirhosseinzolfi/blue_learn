@@ -1,4 +1,5 @@
 const { useState, useEffect, useRef } = React;
+const Chart = window.ReactApexChart;
 const {
     Plus, BookOpen, CheckCircle, ChevronLeft, ChevronRight,
     Play, Layout, Trophy, Loader2, MoreVertical, Trash2,
@@ -34,7 +35,7 @@ function App() {
     const [courses, setCourses] = useState([]);
     const [currentView, setCurrentView] = useState('courses');
     const [dailyMicroCourses, setDailyMicroCourses] = useState([]);
-    const [stats, setStats] = useState({ total_courses: 0, completed_courses: 0, total_sessions: 0, total_completed_sessions: 0, total_study_time: 0, recent_completed: [] });
+    const [stats, setStats] = useState({ total_courses: 0, completed_courses: 0, total_sessions: 0, total_completed_sessions: 0, total_study_time: 0, recent_completed: [], activity_data: [] });
     const [insights, setInsights] = useState([]);
     const [isInsightLoading, setIsInsightLoading] = useState(false);
     const [settings, setSettings] = useState({ google_api_key: '', model_name: '' });
@@ -1308,47 +1309,78 @@ function App() {
                                     (() => {
                                         const sColor = getCourseColor(selectedCourse.color);
                                         return (
-                                    <div className={`bg-dark-lighter border ${sColor.classes.border} rounded-[2rem] p-6 md:p-10 shadow-[0_0_40px_rgba(0,0,0,0.5)]`}>
-                                        <h3 className="text-2xl font-bold mb-8 flex items-center gap-3 text-white">
-                                            <Layout className={sColor.classes.text} size={28} /> سرفصل‌های دوره
-                                        </h3>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                                            {selectedCourse.items.map((item, idx) => (
-                                                <div
-                                                    key={item.id}
-                                                    onClick={() => item.content ? setViewingItem(item) : generateSpecificMicro(item.id)}
-                                                    className={`p-6 pb-5 rounded-3xl border transition-all cursor-pointer flex flex-col justify-between aspect-square group relative overflow-hidden shadow-lg ${item.is_completed
-                                                        ? 'bg-green-500/5 border-green-500/30 shadow-green-900/5'
-                                                        : `bg-dark-lightest/10 border-purple-900/20 ${sColor.classes.hoverBorder} ${sColor.classes.shadowHover}`
-                                                        }`}
-                                                >
-                                                    <div className="z-10 flex-1">
-                                                        <span className={`text-xs font-mono mb-3 block font-bold tracking-wider ${sColor.classes.text} opacity-70`}>درس {idx + 1}</span>
-                                                        <h4 className={`text-lg font-bold leading-tight ${item.is_completed ? 'text-green-400' : 'text-slate-200 group-hover:text-white transition-colors'} ${isEnglish(item.title) ? 'ltr-content' : ''}`}>
-                                                            {item.title}
-                                                        </h4>
-                                                    </div>
-                                                    <div className={`flex justify-between items-center z-10 pt-4 mt-auto border-t ${sColor.classes.border}`}>
-                                                        <div className="text-[10px] text-slate-500 font-medium truncate max-w-[70%]" title={item.chapter || 'فصل نامشخص'}>
-                                                            {item.chapter || 'فصل نامشخص'}
+                                    <div className={`bg-dark-lighter border ${sColor.classes.border} rounded-[2rem] p-6 md:p-10 shadow-[0_0_40px_rgba(0,0,0,0.5)] relative overflow-hidden`}>
+                                        <div className="flex justify-between items-center mb-10 relative z-10">
+                                            <h3 className="text-2xl font-bold flex items-center gap-3 text-white">
+                                                <Layout className={sColor.classes.text} size={28} /> مسیر یادگیری دوره
+                                            </h3>
+                                        </div>
+
+                                        <div className="relative z-10 space-y-12 pr-4">
+                                            {/* Path Line */}
+                                            <div className="absolute right-9 top-10 bottom-10 w-0.5 bg-gradient-to-b from-primary/50 via-primary/20 to-transparent -z-10"></div>
+
+                                            {(() => {
+                                                const chapters = Object.entries(selectedCourse.items.reduce((acc, item) => {
+                                                    const ch = item.chapter || 'مقدمه و کلیات';
+                                                    if (!acc[ch]) acc[ch] = [];
+                                                    acc[ch].push(item);
+                                                    return acc;
+                                                }, {}));
+
+                                                return chapters.map(([chapter, items], cIdx) => {
+                                                    const isChapterDone = items.every(i => i.is_completed);
+                                                    return (
+                                                        <div key={chapter} className="space-y-6">
+                                                            <div className="flex items-center gap-4">
+                                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-4 border-dark shadow-xl ${isChapterDone ? 'bg-green-500 text-white' : 'bg-primary text-white'}`}>
+                                                                    {isChapterDone ? <CheckCircle size={18} /> : <span className="text-sm font-bold">{cIdx + 1}</span>}
+                                                                </div>
+                                                                <h4 className="text-lg font-bold text-white bg-dark-lightest/50 px-4 py-1.5 rounded-xl border border-white/5">{chapter}</h4>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mr-14">
+                                                                {items.map((item, idx) => (
+                                                                    <div
+                                                                        key={item.id}
+                                                                        onClick={() => item.content ? setViewingItem(item) : generateSpecificMicro(item.id)}
+                                                                        className={`p-6 rounded-[2rem] border transition-all cursor-pointer flex flex-col justify-between group relative overflow-hidden shadow-lg ${item.is_completed
+                                                                            ? 'bg-green-500/5 border-green-500/30 hover:shadow-green-500/10'
+                                                                            : `bg-dark-lightest/10 border-purple-900/20 ${sColor.classes.hoverBorder} ${sColor.classes.shadowHover}`
+                                                                            }`}
+                                                                    >
+                                                                        <div className="z-10 mb-4">
+                                                                            <h4 className={`text-sm font-bold leading-tight ${item.is_completed ? 'text-green-400' : 'text-slate-200 group-hover:text-white transition-colors'} ${isEnglish(item.title) ? 'ltr-content' : ''}`}>
+                                                                                {item.title}
+                                                                            </h4>
+                                                                        </div>
+                                                                        <div className="flex justify-between items-center z-10">
+                                                                            {item.is_completed ? (
+                                                                                <div className="flex items-center gap-1.5 text-green-500/80">
+                                                                                    <CheckCircle size={14} />
+                                                                                    <span className="text-[10px] font-bold">تکمیل شده</span>
+                                                                                </div>
+                                                                            ) : item.content ? (
+                                                                                <div className={`${sColor.classes.bgLight} px-2 py-0.5 rounded-lg border ${sColor.classes.border} flex items-center gap-1 shadow-sm`}>
+                                                                                    <Zap size={10} className={sColor.classes.text} />
+                                                                                    <span className={`text-[9px] font-bold ${sColor.classes.text} uppercase tracking-wide`}>آماده</span>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <div className="text-[10px] text-slate-500 font-medium group-hover:text-primary transition-colors">
+                                                                                    تولید محتوا
+                                                                                </div>
+                                                                            )}
+                                                                            <div className={`p-1.5 rounded-lg bg-dark-lighter/50 border border-purple-900/10 group-hover:border-purple-900/30 transition-all ${item.id === (viewingItem?.id) ? 'scale-110 rotate-180' : ''}`}>
+                                                                                <ChevronLeft size={14} className="text-slate-600 group-hover:text-primary transition-colors" />
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
                                                         </div>
-                                                        {item.is_completed ? (
-                                                            <div className="bg-green-500/20 p-1.5 rounded-full drop-shadow-[0_0_10px_rgba(34,197,94,0.3)]">
-                                                                <CheckCircle size={16} className="text-green-500" />
-                                                            </div>
-                                                        ) : item.content ? (
-                                                            <div className={`${sColor.classes.bgLight} px-2.5 py-1 rounded-lg border ${sColor.classes.border} flex items-center gap-1.5 shadow-sm`}>
-                                                                <Zap size={11} className={sColor.classes.text} />
-                                                                <span className={`text-[10px] font-bold ${sColor.classes.text} uppercase tracking-wide`}>آماده</span>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="p-2 rounded-xl bg-dark-lighter/50 border border-purple-900/10 group-hover:border-purple-900/30 transition-colors">
-                                                                <ChevronLeft size={16} className="text-slate-600 group-hover:text-primary transition-colors" />
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                    );
+                                                });
+                                            })()}
                                         </div>
                                     </div>
                                     );
@@ -1524,10 +1556,18 @@ function App() {
                     )}
 
                     {currentView === 'progress' && (
-                        <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                            <h2 className="text-3xl font-bold flex items-center gap-3 text-white">
-                                <BarChart className="text-primary" size={32} /> مسیر یادگیری و پیشرفت شما
-                            </h2>
+                        <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-3xl font-bold flex items-center gap-3 text-white">
+                                    <BarChart className="text-primary" size={32} /> تابلوی پیشرفت
+                                </h2>
+                                <div className="flex gap-2">
+                                    <div className="bg-dark-lighter border border-white/[0.05] px-4 py-2 rounded-2xl flex items-center gap-2">
+                                        <Zap className="text-yellow-500" size={18} />
+                                        <span className="text-sm font-bold text-white">{stats.total_completed_sessions * 10} XP</span>
+                                    </div>
+                                </div>
+                            </div>
 
                             {/* Stats Overview */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1551,8 +1591,59 @@ function App() {
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                {/* Knowledge Insights Section */}
-                                <div className="lg:col-span-2 flex flex-col gap-6">
+                                {/* Left Column: Charts and Insights */}
+                                <div className="lg:col-span-2 flex flex-col gap-8">
+                                    {/* Activity Chart */}
+                                    <div className="bg-dark-lighter border border-white/[0.05] rounded-[2.5rem] p-8 shadow-2xl overflow-hidden relative">
+                                        <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                                            <BarChart size={22} className="text-primary" /> فعالیت هفته اخیر (دقیقه)
+                                        </h3>
+                                        <div className="h-[300px] w-full" dir="ltr">
+                                            <Chart
+                                                options={{
+                                                    chart: {
+                                                        id: "activity-chart",
+                                                        toolbar: { show: false },
+                                                        fontFamily: 'Vazirmatn, Inter, sans-serif',
+                                                        background: 'transparent'
+                                                    },
+                                                    xaxis: {
+                                                        categories: stats.activity_data.map(d => {
+                                                            const date = new Date(d.date);
+                                                            return date.toLocaleDateString('fa-IR', { weekday: 'short' });
+                                                        }),
+                                                        labels: { style: { colors: '#94a3b8' } },
+                                                        axisBorder: { show: false },
+                                                        axisTicks: { show: false }
+                                                    },
+                                                    yaxis: { labels: { style: { colors: '#94a3b8' } } },
+                                                    grid: { borderColor: 'rgba(255,255,255,0.05)', strokeDashArray: 4 },
+                                                    stroke: { curve: 'smooth', width: 3, colors: ['#a855f7'] },
+                                                    fill: {
+                                                        type: 'gradient',
+                                                        gradient: {
+                                                            shadeIntensity: 1,
+                                                            opacityFrom: 0.45,
+                                                            opacityTo: 0.05,
+                                                            stops: [20, 100],
+                                                            colorStops: [
+                                                                { offset: 0, color: '#a855f7', opacity: 0.4 },
+                                                                { offset: 100, color: '#a855f7', opacity: 0 }
+                                                            ]
+                                                        }
+                                                    },
+                                                    markers: { size: 5, colors: ['#a855f7'], strokeColors: '#1e1e2e', strokeWidth: 2, hover: { size: 7 } },
+                                                    theme: { mode: 'dark' },
+                                                    tooltip: { theme: 'dark', x: { show: false } }
+                                                }}
+                                                series={[{ name: "مطالعه", data: stats.activity_data.map(d => d.minutes) }]}
+                                                type="area"
+                                                height="100%"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Knowledge Insights Section */}
                                     <div className="bg-dark-lighter border border-purple-500/20 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
                                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-500"></div>
 
@@ -1573,7 +1664,7 @@ function App() {
                                             </button>
                                         </div>
 
-                                        <div className="space-y-8 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                                        <div className="space-y-8 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                                             {insights.length > 0 ? (
                                                 insights.map((insight, idx) => (
                                                     <div key={insight.id} className={`relative pb-8 ${idx !== insights.length - 1 ? 'border-b border-white/[0.05]' : ''}`}>
@@ -1596,11 +1687,55 @@ function App() {
                                     </div>
                                 </div>
 
-                                {/* Recent Activity & Gamification */}
-                                <div className="flex flex-col gap-6">
+                                {/* Right Column: Level, Badges, Activity */}
+                                <div className="flex flex-col gap-8">
+                                    {/* Level Card */}
+                                    <div className="bg-gradient-to-br from-primary/30 to-indigo-600/30 border border-primary/40 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
+                                        <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-primary/20 rounded-full blur-3xl"></div>
+                                        <h3 className="text-xl font-bold text-white mb-4 relative z-10 flex items-center gap-2">
+                                            <Trophy size={20} className="text-yellow-500" /> سطح یادگیری
+                                        </h3>
+                                        <div className="flex items-end gap-2 mb-6 relative z-10">
+                                            <span className="text-6xl font-black text-white">Lvl {Math.floor(stats.total_study_time / 3600) + 1}</span>
+                                            <span className="text-primary-light font-bold mb-2">Master</span>
+                                        </div>
+                                        <div className="w-full bg-black/30 h-3 rounded-full overflow-hidden mb-3 relative z-10 border border-white/10">
+                                            <div
+                                                className="bg-gradient-to-r from-primary to-purple-400 h-full transition-all duration-1000 shadow-[0_0_15px_rgba(168,85,247,0.5)]"
+                                                style={{ width: `${(stats.total_study_time % 3600) / 36}%` }}
+                                            ></div>
+                                        </div>
+                                        <p className="text-slate-300 text-xs font-medium relative z-10">{(3600 - (stats.total_study_time % 3600)) / 60 < 1 ? 'کمتر از یک دقیقه' : Math.floor((3600 - (stats.total_study_time % 3600)) / 60) + ' دقیقه'} تا سطح بعدی</p>
+                                    </div>
+
+                                    {/* Badges Section */}
                                     <div className="bg-dark-lighter border border-white/[0.05] rounded-[2.5rem] p-8 shadow-2xl">
                                         <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
-                                            <Trophy size={22} className="text-amber-500" /> جلسات اخیر
+                                            <Zap size={22} className="text-yellow-500" /> نشان‌های افتخار
+                                        </h3>
+                                        <div className="grid grid-cols-3 gap-4">
+                                            {[
+                                                { id: 'early_bird', icon: Sparkles, label: 'پیشرو', active: stats.total_completed_sessions >= 1, color: 'text-purple-500', bg: 'bg-purple-500/10' },
+                                                { id: 'consistent', icon: Clock, label: 'مداوم', active: stats.total_study_time >= 3600, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+                                                { id: 'expert', icon: Trophy, label: 'خبره', active: stats.completed_courses >= 1, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+                                                { id: 'social', icon: User, label: 'فعال', active: stats.total_sessions >= 10, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+                                                { id: 'fast', icon: Zap, label: 'سریع', active: false, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+                                                { id: 'scholar', icon: BookOpen, label: 'دانشور', active: stats.total_completed_sessions >= 50, color: 'text-cyan-500', bg: 'bg-cyan-500/10' },
+                                            ].map(badge => (
+                                                <div key={badge.id} className={`flex flex-col items-center gap-2 group ${badge.active ? 'opacity-100' : 'opacity-30 grayscale'}`}>
+                                                    <div className={`w-14 h-14 rounded-2xl ${badge.bg} border border-white/5 flex items-center justify-center transition-all duration-500 ${badge.active ? 'group-hover:scale-110 group-hover:rotate-12 group-hover:shadow-[0_0_20px_rgba(255,255,255,0.05)]' : ''}`}>
+                                                        <badge.icon size={28} className={badge.color} />
+                                                    </div>
+                                                    <span className="text-[10px] font-bold text-slate-400">{badge.label}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Recent Activity List */}
+                                    <div className="bg-dark-lighter border border-white/[0.05] rounded-[2.5rem] p-8 shadow-2xl flex-1">
+                                        <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                                            <Clock size={22} className="text-slate-400" /> جلسات اخیر
                                         </h3>
                                         <div className="space-y-4">
                                             {stats.recent_completed.length > 0 ? (
@@ -1609,11 +1744,11 @@ function App() {
                                                         <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 group-hover:scale-110 transition-transform">
                                                             <CheckCircle size={20} />
                                                         </div>
-                                                        <div className="flex-1 min-w-0">
+                                                        <div className="flex-1 min-w-0 text-right">
                                                             <h4 className="text-sm font-bold text-slate-200 truncate">{item.title}</h4>
                                                             <p className="text-[10px] text-slate-500 mt-0.5 truncate flex justify-between items-center">
-                                                                <span>{item.course_title}</span>
                                                                 <span className="bg-white/5 px-1.5 py-0.5 rounded text-[9px] font-mono">{formatTime(item.study_time)}</span>
+                                                                <span className="truncate ml-2">{item.course_title}</span>
                                                             </p>
                                                         </div>
                                                     </div>
@@ -1624,22 +1759,6 @@ function App() {
                                                 </div>
                                             )}
                                         </div>
-                                    </div>
-
-                                    <div className="bg-gradient-to-br from-primary/20 to-indigo-600/20 border border-primary/30 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
-                                        <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-primary/20 rounded-full blur-3xl"></div>
-                                        <h3 className="text-xl font-bold text-white mb-4 relative z-10">سطح یادگیری شما</h3>
-                                        <div className="flex items-end gap-2 mb-6 relative z-10">
-                                            <span className="text-5xl font-black text-white">Lvl {Math.floor(stats.total_study_time / 3600) + 1}</span>
-                                            <span className="text-primary font-bold mb-2">Master</span>
-                                        </div>
-                                        <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden mb-2 relative z-10">
-                                            <div
-                                                className="bg-primary h-full transition-all duration-1000"
-                                                style={{ width: `${(stats.total_study_time % 3600) / 36}%` }}
-                                            ></div>
-                                        </div>
-                                        <p className="text-slate-400 text-[10px] relative z-10">{(3600 - (stats.total_study_time % 3600)) / 60 < 1 ? 'کمتر از یک دقیقه' : Math.floor((3600 - (stats.total_study_time % 3600)) / 60) + ' دقیقه'} تا سطح بعدی</p>
                                     </div>
                                 </div>
                             </div>
