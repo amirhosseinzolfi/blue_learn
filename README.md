@@ -1,57 +1,82 @@
-# AI Puzzle Learning Platform
+# 🧩 Blue Learn: AI-Powered Micro-Learning
 
-A streamlined, AI-powered micro-learning platform built with FastAPI and React. This version is optimized for simplicity, requiring **zero Node.js dependencies**.
+Blue Learn is a modern, streamlined micro-learning platform that transforms any subject into a structured, interactive "puzzle" of bite-sized lessons. Built with **FastAPI** and **React**, it's designed for efficiency with **zero Node.js dependencies**.
 
-## Features
-- **Comprehensive Outline Generation:** Automatically creates a detailed learning path for any subject.
-- **Puzzle-Style Learning:** Learn concepts in a non-linear, bite-sized "puzzle" format.
-- **Micro-Courses:** Each concept is generated as a concise, readable article.
-- **Progress Tracking:** Visual progress bars and completed item tracking.
-- **AI Agents:** Powered by Google Gemini via LangChain and LangGraph.
+---
 
-## Tech Stack
+## ✨ Key Features
+
+- 🎯 **Intelligent Curriculum Design:** AI agents build comprehensive, non-linear learning paths for any topic.
+- 🧩 **Puzzle-Style Learning:** Break down complex subjects into manageable, micro-sized "puzzles".
+- ✍️ **On-Demand Content:** Each concept is generated as a concise, high-quality Markdown lesson.
+- 🤖 **Contextual AI Coach:** A smart assistant that knows exactly what you're studying and helps you master it.
+- 📈 **Mastery Tracking:** Visual progress indicators and persistent state management.
+- 🚀 **Zero-Build Frontend:** Lightweight React implementation using CDNs for instant deployment.
+
+## 🛠️ Tech Stack
+
 - **Backend:** FastAPI (Python 3.12+)
-- **Frontend:** React (Loaded via CDN, zero build step)
-- **Database:** SQLite (SQLAlchemy)
-- **AI:** Google Gemini API
+- **Frontend:** React (Standalone SPA, CDN-based)
+- **Database:** SQLite with SQLAlchemy ORM
+- **AI Engine:** Google Gemini Pro/Flash via LangChain & LangGraph
+- **Styling:** Custom CSS with Glassmorphism aesthetics
 
-## Project Structure
+## 📂 Project Structure
+
 ```text
 blue_learn/
-├── static/              # Frontend files
-│   └── index.html       # Standalone React SPA (CDN based)
-├── main.py              # FastAPI application & route definitions
-├── agents.py            # AI Logic (Outline & Content generation)
-├── models.py            # Database schemas
-├── database.py          # Database connection setup
-├── requirements.txt     # Python dependencies
-├── .env                 # Environment variables (API Keys)
-└── .venv/               # Python virtual environment
+├── static/              # 🎨 Frontend Assets (HTML, CSS, JS/JSX)
+│   ├── index.html       # Main Entry Point (CDN React)
+│   ├── js/              # React Components & Logic
+│   └── css/             # Modern UI Styling
+├── agents.py            # 🧠 AI Logic & LangChain Workflows
+├── main.py              # 🔌 FastAPI Routes & API Endpoints
+├── models.py            # 📊 Database Schemas
+├── database.py          # 💾 DB Connection & Session Management
+├── requirements.txt     # 📦 Python Dependencies
+└── .env.example         # ⚙️ Template for Environment Variables
 ```
 
-## How to Run
+## 🚀 Getting Started
 
-1. **Setup Environment:**
-   Ensure you have a `.env` file in the root directory with your Google API Key:
-   ```env
-   GOOGLE_API_KEY=your_actual_key_here
-   ```
+### 1. Prerequisites
+- Python 3.12 or higher
+- A Google Gemini API Key ([Get one here](https://aistudio.google.com/))
 
-2. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 2. Installation
+```bash
+# Clone the repository
+git clone https://github.com/amirhosseinzolfi/blue_learn.git
+cd blue_learn
 
-3. **Start the App:**
-   ```bash
-   uvicorn main:app --reload --port 8082
-   ```
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-4. **Open in Browser:**
-   Navigate to [http://localhost:8082](http://localhost:8082)
+# Install dependencies
+pip install -r requirements.txt
+```
 
-## Usage
-1. Enter a subject (e.g., "Deep Learning" or "Photography").
-2. Click **Create Course** to generate a custom outline.
-3. Use **Generate Micro Course** to dive into random topics or click specific parts of the "Puzzle".
-4. Mark topics as finished to track your mastery.
+### 3. Configuration
+Copy `.env.example` to `.env` and add your API key:
+```env
+GOOGLE_API_KEY=your_gemini_api_key_here
+GENERATOR_MODEL_NAME=gemini-1.5-flash
+```
+
+### 4. Run the Application
+```bash
+uvicorn main:app --reload --port 8082
+```
+Access the app at: `http://localhost:8082`
+
+## 📖 Usage
+1. **Discover:** Enter any subject you want to learn.
+2. **Consult:** Chat with the AI to refine your learning goals.
+3. **Build:** Generate a custom-tailored course outline.
+4. **Learn:** Click on any "puzzle piece" to generate and study micro-content.
+5. **Master:** Mark lessons as complete and track your journey!
+
+---
+
+*Built with ❤️ for lifelong learners.*
