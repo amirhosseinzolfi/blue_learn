@@ -1,8 +1,11 @@
 import os
 import time
+import json
+import math
 from typing import List, Optional
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import OllamaEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic import BaseModel, Field
@@ -23,6 +26,9 @@ def get_generator_llm():
         google_api_key=os.getenv("GOOGLE_API_KEY"),
         temperature=0.75,
     )
+
+def get_embeddings_model():
+    return OllamaEmbeddings(model="nomic-embed-text-v2-moe:latest")
 
 # --- Dedicated LLM for Content Generation (lesson writing) ---
 def get_content_llm():
@@ -73,6 +79,31 @@ class ChatAgentResponse(BaseModel):
     chat_response: Optional[str] = Field(description="If is_complete is false, this is the question you ask the user. If is_complete is true, this can be empty.")
     course_data: Optional[CourseGenerationSchema] = Field(description="If is_complete is true, this contains the full generated course data.")
 
+class KnowledgeNodeUpdateSchema(BaseModel):
+    concept: str = Field(description="Name of the concept, e.g., SQL Joins")
+    category: str = Field(description="Category of the concept")
+    mastery_score_delta: float = Field(description="Change in mastery score from 0.0 to 1.0")
+    confidence_score: float = Field(description="Confidence of AI in this evaluation from 0.0 to 1.0")
+
+class ProfilerUpdateSchema(BaseModel):
+    global_learning_velocity: float = Field(description="Speed coefficient from 0.5 to 2.0")
+    attention_span_minutes: int = Field(description="Adjusted average session time")
+    retention_index: float = Field(description="Memory decay indicator from 0.0 to 1.0")
+    ls_hands_on: float = Field(default=0.0, description="Learning style ratio for hands_on")
+    ls_visual: float = Field(default=0.0, description="Learning style ratio for visual")
+    ls_theoretical: float = Field(default=0.0, description="Learning style ratio for theoretical")
+    ls_self_directed: float = Field(default=0.0, description="Learning style ratio for self_directed")
+    pt_persistence: str = Field(default="", description="Personality trait persistence")
+    pt_patience: str = Field(default="", description="Personality trait patience_with_errors")
+    pt_curiosity: str = Field(default="", description="Personality trait learning_curiosity")
+    pt_session_length: str = Field(default="", description="Personality trait preferred_session_length")
+    learning_style_summary: str = Field(default="", description="Persian narrative of how the user learns best")
+    personality_summary: str = Field(default="", description="Persian narrative of the user's learner personality")
+    strength_areas: List[str] = Field(default=[], description="Persian list of top subject domains")
+    new_interests: List[str] = Field(default=[], description="Persian list of newly discovered interests")
+    recommended_topics: List[str] = Field(default=[], description="Persian list of recommended next topics")
+    updated_knowledge_nodes: List[KnowledgeNodeUpdateSchema] = Field(description="Updates to the knowledge graph")
+
 # ==========================================
 # 3. CORE GENERATION FUNCTIONS
 # ==========================================
@@ -106,7 +137,7 @@ def get_outline(subject: str) -> List[OutlineItemSchema]:
     
     return result.items
 
-def get_content(subject: str, item_title: str, course_description: str = "", full_outline: List[str] = None) -> str:
+def get_content(subject: str, item_title: str, course_description: str = "", full_outline: List[str] = None, user_info: str = "") -> str:
     """
     Generates the actual Markdown content for a specific lesson/session.
     Provides the LLM with the broader course context to maintain consistency.
@@ -116,22 +147,38 @@ def get_content(subject: str, item_title: str, course_description: str = "", ful
     logger.log_process_start("Content Generation", f"Generating lesson: '{item_title}' for course '{subject}'")
     start_time = time.time()
 
+    user_prompt_template = """Please write the full session content now.
+
+Session Details:
+- this session Title: {item_title}
+- Course: {subject}
+
+Course Context:
+{course_desc}
+
+Course Outline:
+{outline_context}
+"""
+
     # Use ChatPromptTemplate for standard LangChain pattern
     # NOTE: Google GenAI requires at least one human/user message in `contents`.
     # We add a minimal human turn after the system prompt to satisfy this requirement.
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", prompts.CONTENT_GENERATOR_PROMPT),
-        ("human", "Please write the full session content now."),
+        ("human", user_prompt_template),
     ])
     
     chain = prompt_template | get_content_llm()
     
-    result = chain.invoke({
+    invoke_args = {
         "item_title": item_title,
         "subject": subject,
         "course_desc": course_description,
-        "outline_context": outline_context
-    })
+        "outline_context": outline_context,
+        "user_info": user_info or "Not provided"
+    }
+    
+    result = chain.invoke(invoke_args)
     
     content = result.content
     
@@ -143,7 +190,7 @@ def get_content(subject: str, item_title: str, course_description: str = "", ful
         step_name="Lesson Content Generation",
         model_name=get_content_llm().model,
         system_prompt=prompts.CONTENT_GENERATOR_PROMPT,
-        user_input=f"Item: {item_title}\nCourse Context: {course_description}\nOutline: {outline_context}",
+        user_input=user_prompt_template.format(**invoke_args),
         result=content
     )
     
@@ -191,14 +238,15 @@ def generate_history_summary(messages: List[dict], current_summary: str = None) 
     
     return summary_content
 
-def chat_course_generator(messages: List[dict]) -> ChatAgentResponse:
+def chat_course_generator(messages: List[dict], user_info: str = "") -> ChatAgentResponse:
     """
     Acts as a consultant to gather requirements from the user before building a course.
     Returns structured data that dictates whether to keep chatting or proceed to generation.
     """
     # Use ChatPromptTemplate for standard LangChain message handling
+    system_prompt = prompts.COURSE_GENERATOR_SYSTEM_PROMPT.format(user_info=user_info)
     prompt_template = ChatPromptTemplate.from_messages([
-        ("system", prompts.COURSE_GENERATOR_SYSTEM_PROMPT),
+        ("system", system_prompt),
         MessagesPlaceholder(variable_name="history"),
     ])
     
@@ -226,7 +274,7 @@ def chat_course_generator(messages: List[dict]) -> ChatAgentResponse:
     logger.log_ai_call(
         step_name="Course Generator Assistant",
         model_name=get_generator_llm().model,
-        system_prompt=prompts.COURSE_GENERATOR_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_input=full_conversation_log.strip(),
         result=result.model_dump_json(indent=2)
     )
@@ -235,19 +283,20 @@ def chat_course_generator(messages: List[dict]) -> ChatAgentResponse:
     
     return result
 
-def chat_coach_stream(messages: List[dict], course_title: str, course_description: str, outline_titles: List[str], current_session_title: str, current_session_content: str, chat_summary: str = None):
-    """
-    A contextual AI coach that streams its response back to the client.
-    It is injected with the specific session the user is currently reading.
-    """
-    outline_context = "\n".join([f"- {t}" for t in outline_titles])
+def chat_coach_stream(messages: List[dict], course_title: str, course_description: str, outline_titles: List[str], current_session_title: str, current_session_content: str, chat_summary: Optional[str] = None, user_info: str = "", semantic_memory_context: str = ""):
+    logger.log_process_start("Smart Coach Agent", "Generating streaming response")
+    
+    outline_context = "\n".join([f"- {title}" for title in outline_titles])
+    
     system_prompt = prompts.SMART_COACH_SYSTEM_PROMPT.format(
         course_title=course_title,
         course_description=course_description,
         outline_context=outline_context,
         current_session_title=current_session_title,
         current_session_content=current_session_content or "No content available yet.",
-        chat_summary_context=f"\n[PREVIOUS CONVERSATION SUMMARY]:\n{chat_summary}\n" if chat_summary else ""
+        chat_summary_context=f"\n[PREVIOUS CONVERSATION SUMMARY]:\n{chat_summary}\n" if chat_summary else "",
+        user_info=user_info,
+        semantic_memory_context=semantic_memory_context
     )
     # Use ChatPromptTemplate for standard LangChain message handling
     prompt_template = ChatPromptTemplate.from_messages([
@@ -341,3 +390,88 @@ def generate_knowledge_insight(completed_sessions: List[dict]) -> str:
 
     logger.log_process_end("Knowledge Insight Generation", time.time() - start_time)
     return content
+
+def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: str) -> Optional[ProfilerUpdateSchema]:
+    """
+    Analyzes recent learning events and returns a structured JSON update for the Cognitive Profile.
+    """
+    logger.log_process_start("Cognitive Profiler Agent", "Analyzing event logs for double-loop learning")
+    start_time = time.time()
+
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", prompts.COGNITIVE_PROFILER_SYSTEM_PROMPT),
+        ("human", "User Profile:\n{user_profile}\n\nCurrent Cognitive State:\n{current_state}\n\nRecent Logs:\n{recent_logs}\n\nProvide the updated profile JSON now."),
+    ])
+
+    try:
+        # We use the main generative model for complex analysis
+        llm = get_generator_llm()
+        structured_llm = llm.with_structured_output(ProfilerUpdateSchema)
+        chain = prompt_template | structured_llm
+        
+        user_input_formatted = f"User Profile:\n{user_profile}\n\nCurrent Cognitive State:\n{current_state}\n\nRecent Logs:\n{recent_logs}\n\nProvide the updated profile JSON now."
+        
+        result = chain.invoke({
+            "user_profile": user_profile,
+            "current_state": current_state,
+            "recent_logs": recent_logs
+        })
+        
+        logger.log_ai_call(
+            step_name="Cognitive Profiler Agent",
+            model_name=llm.model,
+            system_prompt=prompts.COGNITIVE_PROFILER_SYSTEM_PROMPT,
+            user_input=user_input_formatted,
+            result=result.model_dump_json(indent=2) if result else "None"
+        )
+        
+        logger.log_success("Cognitive Profiler Agent generated a new dynamic profile")
+        logger.log_process_end("Cognitive Profiler Agent", time.time() - start_time)
+        return result
+    except Exception as e:
+        logger.log_error(f"Error in Cognitive Profiler Agent: {str(e)}")
+        logger.log_process_end("Cognitive Profiler Agent", time.time() - start_time)
+        return None
+
+def calculate_cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Mathematical standard vector similarity calculation."""
+    dot_product = sum(a * b for a, b in zip(v1, v2))
+    mag1 = math.sqrt(sum(a * a for a in v1))
+    mag2 = math.sqrt(sum(b * b for b in v2))
+    if mag1 == 0 or mag2 == 0: return 0.0
+    return dot_product / (mag1 * mag2)
+
+def semantic_search_logs(query: str, logs_with_vectors: List[dict], top_k: int = 3) -> str:
+    """
+    Standard lightweight LangChain semantic search.
+    Embeds the user's query and compares it to all past embedded logs.
+    """
+    logger.log_process_start("Semantic Vector Search", f"Searching past memories for: '{query}'")
+    start_time = time.time()
+    
+    try:
+        embedder = get_embeddings_model()
+        query_vector = embedder.embed_query(query)
+        
+        scored_logs = []
+        for log in logs_with_vectors:
+            if not log.get('vector'): continue
+            similarity = calculate_cosine_similarity(query_vector, log['vector'])
+            scored_logs.append((similarity, log))
+            
+        # Sort by highest similarity (most relevant)
+        scored_logs.sort(key=lambda x: x[0], reverse=True)
+        top_logs = scored_logs[:top_k]
+        
+        context_str = ""
+        logger.log_info("--- Top Semantic Memory Results ---")
+        for idx, (score, log) in enumerate(top_logs):
+            logger.log_info(f"Memory {idx+1} [Score: {score:.3f}]: {log['title']}")
+            if score > 0.65: # Threshold to ensure relevance
+                context_str += f"- Past Session '{log['title']}': {log['text']}\n"
+                
+        logger.log_process_end("Semantic Vector Search", time.time() - start_time)
+        return context_str if context_str else "No highly relevant past memories found."
+    except Exception as e:
+        logger.log_error(f"Semantic Search Failed: {str(e)}")
+        return "Memory retrieval unavailable."

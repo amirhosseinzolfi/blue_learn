@@ -4,19 +4,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="بلو لرن — پلتفرم یادگیری هوشمند با هوش مصنوعی">
     <title>Blue Learn AI | بلو لرن هوش مصنوعی</title>
 
-    <!-- Tailwind CSS & Configuration -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script src="/assets/js/tailwind.config.js"></script>
-    
-    <!-- Fonts & Global Styles -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
-    <link href="/assets/css/styles.css" rel="stylesheet" type="text/css" />
 
-    <!-- React Stack -->
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+    <link href="/assets/css/styles.css" rel="stylesheet">
+
+    <!-- React -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
@@ -32,8 +33,25 @@
 <body>
     <div id="root"></div>
 
-    <!-- Application Components -->
+    <!-- Load order: icons → constants → api → hooks → components → views → app -->
     <script type="text/babel" src="/assets/js/icons.jsx"></script>
+    <script type="text/babel" src="/assets/js/constants.js"></script>
+    <script type="text/babel" src="/assets/js/api.js"></script>
+    <script type="text/babel" src="/assets/js/hooks.js"></script>
+
+    <!-- UI Components -->
+    <script type="text/babel" src="/assets/js/components/Sidebar.jsx"></script>
+    <script type="text/babel" src="/assets/js/components/Modals.jsx"></script>
+
+    <!-- View Sub-components -->
+    <script type="text/babel" src="/assets/js/components/views/CourseCard.jsx"></script>
+    <script type="text/babel" src="/assets/js/components/views/CourseSubComponents.jsx"></script>
+    <script type="text/babel" src="/assets/js/components/views/CoursesView.jsx"></script>
+    <script type="text/babel" src="/assets/js/components/views/MicroView.jsx"></script>
+    <script type="text/babel" src="/assets/js/components/views/ProgressView.jsx"></script>
+    <script type="text/babel" src="/assets/js/components/views/SettingsView.jsx"></script>
+
+    <!-- Root App -->
     <script type="text/babel" src="/assets/js/app.jsx"></script>
 </body>
 

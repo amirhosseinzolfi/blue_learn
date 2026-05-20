@@ -5,6 +5,7 @@ body {
     color: #f8fafc;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
 }
 
 /* Base Prose Styles */
@@ -42,8 +43,8 @@ body {
 
 /* Custom minimal scrollbar — hidden by default, visible on hover */
 ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+    width: 3px;
+    height: 3px;
 }
 
 ::-webkit-scrollbar-track {
@@ -51,16 +52,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 4px;
+    background: rgba(168, 85, 247, 0);
+    border-radius: 10px;
 }
 
 *:hover::-webkit-scrollbar-thumb {
-    background: rgba(168, 85, 247, 0.25);
+    background: rgba(168, 85, 247, 0.15);
 }
 
 *:hover::-webkit-scrollbar-thumb:hover {
-    background: rgba(168, 85, 247, 0.45);
+    background: rgba(168, 85, 247, 0.35);
 }
 
 * {
@@ -69,5 +70,20 @@ body {
 }
 
 *:hover {
-    scrollbar-color: rgba(168, 85, 247, 0.2) transparent;
+    scrollbar-color: rgba(168, 85, 247, 0.15) transparent;
+}
+
+/* Animations */
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+@keyframes bounce-subtle {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+}
+
+.animate-bounce-subtle {
+    animation: bounce-subtle 2s infinite ease-in-out;
 }
