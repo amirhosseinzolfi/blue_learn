@@ -1,8 +1,8 @@
 const {
-    BookOpen, Layout, Zap, BarChart, Settings, Plus
+    BookOpen, Layout, Zap, BarChart, Settings, Sparkles
 } = window.Icons;
 
-function Sidebar({ currentView, setCurrentView, setSelectedCourse, openChatModal }) {
+function Sidebar({ currentView, onNavigate, openChatModal, onLogout }) {
     const navItems = [
         { view: 'courses', icon: Layout, label: 'دوره\u200cها' },
         { view: 'micro', icon: Zap, label: 'میکرو دوره\u200cها' },
@@ -10,7 +10,7 @@ function Sidebar({ currentView, setCurrentView, setSelectedCourse, openChatModal
         { view: 'settings', icon: Settings, label: 'تنظیمات' },
     ];
 
-    const navigate = (view) => { setCurrentView(view); setSelectedCourse(null); };
+    const navigate = (view) => { onNavigate(view); };
 
     return (
         <>
@@ -48,18 +48,20 @@ function Sidebar({ currentView, setCurrentView, setSelectedCourse, openChatModal
                     </nav>
 
                     {/* New course button */}
-                    <div className="p-2 pb-2.5 shrink-0 border-t border-white/[0.04]">
+                    <div className="p-2.5 pb-4 shrink-0 border-t border-white/[0.04]">
                         <button
                             onClick={openChatModal}
                             title="دوره جدید"
                             className="w-full h-10 flex items-center rounded-xl bg-primary/20 hover:bg-primary/30 border border-primary/25 hover:border-primary/50 text-primary transition-all duration-200 group/btn overflow-hidden"
                         >
                             <span className="flex items-center justify-center w-[52px] shrink-0">
-                                <Plus size={17} className="group-hover/btn:rotate-90 transition-transform duration-300" />
+                                <Sparkles size={17} className="group-hover/btn:scale-125 group-hover/btn:rotate-[15deg] transition-transform duration-300 text-primary drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]" />
                             </span>
                             <span className="text-[15px] font-bold opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pr-1">دوره جدید</span>
                         </button>
                     </div>
+
+
                 </aside>
             </div>
 
@@ -85,10 +87,12 @@ function Sidebar({ currentView, setCurrentView, setSelectedCourse, openChatModal
                     </div>
                     <button
                         onClick={openChatModal}
-                        className="mr-1 p-2 rounded-xl text-primary bg-primary/15 hover:bg-primary/25 border border-primary/20 transition-all duration-200"
+                        className="mr-1 p-2 rounded-xl text-primary bg-primary/15 hover:bg-primary/25 border border-primary/20 transition-all duration-200 flex items-center justify-center"
+                        title="دوره جدید"
                     >
-                        <Plus size={16} />
+                        <Sparkles size={16} />
                     </button>
+
                 </div>
             </header>
         </>

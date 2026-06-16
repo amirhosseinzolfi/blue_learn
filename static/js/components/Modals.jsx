@@ -2,46 +2,225 @@ const { useState, useRef } = React;
 const {
     Bot, X, Send, Loader2, CheckCircle,
     Sparkles, Minimize, Settings, Plus, Edit2,
-    Image, Palette
+    Image, Palette, BarChart, Clock, BookOpen
 } = window.Icons;
 
 // ─── Blue AI Course Generator Chat Modal ───────────────────────────────────
-function ChatModal({ messages, input, setInput, isLoading, onSend, onClose, pendingCourseData, onAcceptCourse }) {
+// ─── Custom SVG Icons for ChatModal ───────────────────────────────────────
+const SlidersIcon = ({ size = 18, className = '', ...props }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+        <line x1="4" y1="21" x2="4" y2="14" />
+        <line x1="4" y1="10" x2="4" y2="3" />
+        <line x1="12" y1="21" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12" y2="3" />
+        <line x1="20" y1="21" x2="20" y2="16" />
+        <line x1="20" y1="12" x2="20" y2="3" />
+        <line x1="1" y1="14" x2="7" y2="14" />
+        <line x1="9" y1="8" x2="15" y2="8" />
+        <line x1="17" y1="16" x2="23" y2="16" />
+    </svg>
+);
+
+const MicIcon = ({ size = 20, className = '', ...props }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+    </svg>
+);
+
+const PaperclipIcon = ({ size = 20, className = '', ...props }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+    </svg>
+);
+
+const ArrowLeftIcon = ({ size = 20, className = '', ...props }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+        <line x1="19" y1="12" x2="5" y2="12" />
+        <polyline points="12 19 5 12 12 5" />
+    </svg>
+);
+
+
+function ChatModal({ 
+    messages, input, setInput, isLoading, onSend, onClose, pendingCourseData, onAcceptCourse, autoGenerateSessionCovers,
+    level, setLevel, durationSessions, setDurationSessions, learningStyle, setLearningStyle,
+    attachedFiles, setAttachedFiles
+}) {
     const scrollRef = useRef(null);
+    const prevLenRef = useRef(messages.length);
+    const fileInputRef = useRef(null);
+    
+    // UI state
+    const [isPrefsOpen, setIsPrefsOpen] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingTime, setRecordingTime] = useState(0);
+    const [levelOpen, setLevelOpen] = useState(false);
+    const [styleOpen, setStyleOpen] = useState(false);
+    
+    // Refs for recording
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    const timerRef = useRef(null);
 
     React.useEffect(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        const container = scrollRef.current;
+        if (container) {
+            const isNewMessage = messages.length > prevLenRef.current;
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+            if (isNewMessage || isNearBottom || isLoading) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        prevLenRef.current = messages.length;
     }, [messages, isLoading]);
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-dark/95 backdrop-blur-xl p-4">
-            <div className="w-full max-w-4xl h-full max-h-[90vh] flex flex-col bg-dark-lighter border border-purple-500/20 rounded-[2.5rem] shadow-[0_0_80px_rgba(168,85,247,0.15)] overflow-hidden relative">
-                <button onClick={onClose} className="absolute top-6 left-6 z-10 w-12 h-12 rounded-full bg-dark-lightest/80 flex items-center justify-center text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-all backdrop-blur-sm">
-                    <X size={24} />
-                </button>
+    // Cleanup recording timer on unmount
+    React.useEffect(() => {
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, []);
 
-                <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 scroll-smooth pt-20" ref={scrollRef}>
-                    <div className="text-center mb-8">
-                        <div className="w-20 h-20 mx-auto rounded-full bg-primary/20 flex items-center justify-center text-primary border border-primary/20 shadow-[0_0_30px_rgba(168,85,247,0.3)] mb-4">
-                            <Bot size={40} className="animate-pulse" />
+    // File Selector handler
+    const handleFileSelect = (e) => {
+        const files = Array.from(e.target.files || []);
+        files.forEach(file => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const type = file.type.startsWith('image/') ? 'image' : 'audio';
+                setAttachedFiles(prev => [
+                    ...prev,
+                    { id: Date.now() + Math.random(), name: file.name, type: type, data: reader.result }
+                ]);
+            };
+            reader.readAsDataURL(file);
+        });
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const removeAttachedFile = (id) => {
+        setAttachedFiles(prev => prev.filter(f => f.id !== id));
+    };
+
+    // Microphone Recording handlers
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorderRef.current = new MediaRecorder(stream);
+            audioChunksRef.current = [];
+
+            mediaRecorderRef.current.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    audioChunksRef.current.push(e.data);
+                }
+            };
+
+            mediaRecorderRef.current.onstop = () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setAttachedFiles(prev => [
+                        ...prev,
+                        { id: Date.now() + Math.random(), name: `صدای ضبط‌شده (${recordingTime} ثانیه).mp3`, type: 'audio', data: reader.result }
+                    ]);
+                };
+                reader.readAsDataURL(audioBlob);
+                stream.getTracks().forEach(track => track.stop());
+            };
+
+            mediaRecorderRef.current.start();
+            setIsRecording(true);
+            setRecordingTime(0);
+
+            timerRef.current = setInterval(() => {
+                setRecordingTime(prev => prev + 1);
+            }, 1000);
+
+        } catch (err) {
+            console.error("Recording error:", err);
+            alert("امکان دسترسی به میکروفون وجود ندارد. لطفا مجوزهای دسترسی را بررسی نمایید.");
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-dark/90 backdrop-blur-md p-4">
+            <div className="w-full max-w-4xl h-full max-h-[90vh] flex flex-col bg-dark-lighter border border-purple-500/15 rounded-3xl shadow-[0_15px_50px_rgba(0,0,0,0.5)] overflow-hidden relative">
+                
+                {/* Header Controls (Minimal Close Button on Left/Right) */}
+                <div className="absolute top-4 left-4 z-20">
+                    <button 
+                        onClick={onClose} 
+                        className="w-10 h-10 rounded-xl bg-dark-lightest/40 flex items-center justify-center text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-all backdrop-blur-sm border border-purple-500/5"
+                        title="بستن"
+                    >
+                        <X size={20} />
+                    </button>
+                </div>
+
+                {/* Main scrollable area */}
+                <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 scroll-smooth pt-12" ref={scrollRef}>
+                    
+                    {/* Logo Intro */}
+                    <div className="text-center mb-8 mt-4">
+                        <div className="w-14 h-14 mx-auto rounded-2xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20 shadow-[0_0_20px_rgba(168,85,247,0.15)] mb-3">
+                            <Bot size={28} className="animate-pulse" />
                         </div>
-                        <h2 className="text-3xl font-bold text-white tracking-tight">Blue</h2>
-                        <p className="text-sm text-primary font-medium mt-2">معمار هوشمند آموزش شما</p>
+                        <h2 className="text-xl font-bold text-white tracking-tight">بلو</h2>
+                        <p className="text-xs text-primary font-medium mt-1">معمار هوشمند آموزش شخصی‌سازی شده شما</p>
                     </div>
 
+                    {/* Messages list */}
                     {messages.map((msg, idx) => (
                         <div key={idx} className="flex flex-col w-full">
                             {msg.role === 'user' ? (
-                                <div className="bg-primary/20 text-slate-100 px-8 py-5 rounded-[2rem] rounded-tr-sm max-w-[80%] border border-primary/20 shadow-lg ml-auto text-xl leading-relaxed">
-                                    {msg.content}
+                                <div className="bg-primary/10 text-slate-200 px-6 py-3.5 rounded-2xl rounded-tr-none max-w-[75%] border border-primary/15 shadow-sm ml-auto text-sm leading-relaxed mb-6">
+                                    
+                                    {/* Text Content */}
+                                    {msg.content && <p className="whitespace-pre-line">{msg.content}</p>}
+                                    
+                                    {/* Visual files previews */}
+                                    {(msg.images?.length > 0 || msg.audio?.length > 0) && (
+                                        <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-primary/10">
+                                            {msg.images?.map((img, i) => (
+                                                <img key={i} src={img} className="w-16 h-16 object-cover rounded-lg border border-white/10" />
+                                            ))}
+                                            {msg.audio?.map((aud, i) => (
+                                                <div key={i} className="flex items-center gap-1.5 bg-dark-lighter/50 px-2.5 py-1 rounded-lg text-[10px] text-slate-300">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                                                    <span>صوت پیوست</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
-                                <div className="text-slate-200 w-full text-lg leading-relaxed py-4 pr-6 border-r-[3px] border-primary/40">
-                                    <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.content || '...') }} className={`prose prose-invert prose-purple max-w-none prose-p:text-slate-300 prose-headings:text-white prose-a:text-primary ${isEnglish(msg.content) ? 'ltr-content' : ''}`} />
+                                <div className="text-slate-300 w-full text-sm leading-relaxed py-4 pr-5 border-r-[3px] border-primary/40 mb-6">
+                                    <div 
+                                        dangerouslySetInnerHTML={{ __html: marked.parse(msg.content || '...') }} 
+                                        className={`prose prose-invert prose-purple max-w-none prose-p:text-slate-300 prose-p:my-1.5 prose-headings:text-white prose-a:text-primary text-sm ${isEnglish(msg.content) ? 'ltr-content' : ''}`} 
+                                    />
+                                    
                                     {idx === messages.length - 1 && pendingCourseData && (
-                                        <div className="mt-8">
-                                            <button onClick={onAcceptCourse} className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 text-lg shadow-[0_0_30px_rgba(16,185,129,0.3)] hover:shadow-[0_0_40px_rgba(16,185,129,0.5)] transition-all hover:scale-105">
-                                                <CheckCircle size={24} /> تایید و ساخت دوره
+                                        <div className="mt-4 flex flex-col gap-4">
+                                            <button 
+                                                onClick={() => onAcceptCourse(autoGenerateSessionCovers)} 
+                                                className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 text-xs shadow-md transition-all hover:scale-103 w-fit"
+                                            >
+                                                <CheckCircle size={16} /> تایید و ساخت دوره
                                             </button>
                                         </div>
                                     )}
@@ -50,26 +229,217 @@ function ChatModal({ messages, input, setInput, isLoading, onSend, onClose, pend
                         </div>
                     ))}
                     {isLoading && (
-                        <div className="flex items-center gap-4 pr-6 border-r-[3px] border-primary/40 py-4">
-                            <Loader2 size={28} className="text-primary animate-spin" />
-                            <span className="animate-pulse text-xl text-slate-400">بلو در حال فکر کردن...</span>
+                        <div className="flex items-center gap-3 pr-4 border-r-2 border-primary/20 py-2">
+                            <Loader2 size={20} className="text-primary animate-spin" />
+                            <span className="animate-pulse text-xs text-slate-400">بلو در حال فکر کردن...</span>
                         </div>
                     )}
                 </div>
 
-                <div className="p-6 md:p-8 bg-gradient-to-t from-dark-lighter via-dark-lighter to-transparent shrink-0">
-                    <form onSubmit={(e) => { e.preventDefault(); onSend(); }} className="flex items-center relative max-w-3xl mx-auto">
-                        <input
-                            type="text" value={input} onChange={(e) => setInput(e.target.value)}
-                            placeholder={pendingCourseData ? 'یا تغییرات مورد نظرتان را بنویسید...' : 'پاسخ خود را برای بلو بنویسید...'}
-                            className="w-full bg-dark-lightest/80 backdrop-blur-md border border-purple-900/50 rounded-[2rem] py-5 pl-20 pr-8 text-lg text-white focus:outline-none focus:border-primary/80 focus:ring-1 focus:ring-primary/50 transition-all shadow-inner placeholder:text-slate-500"
-                            disabled={isLoading} autoFocus
-                        />
-                        <button type="submit" disabled={isLoading || !input.trim()} className="absolute left-3 top-3 bottom-3 w-14 rounded-[1.5rem] bg-primary/20 hover:bg-primary text-primary hover:text-white transition-all flex items-center justify-center disabled:opacity-0 disabled:scale-90">
-                            <Send size={24} className="rotate-180" />
-                        </button>
+                {/* Footer Input Area */}
+                <div className="p-4 md:p-6 bg-gradient-to-t from-dark-lighter via-dark-lighter to-transparent shrink-0">
+                    <form 
+                        onSubmit={(e) => { e.preventDefault(); onSend(); }} 
+                        className="flex flex-col max-w-3xl mx-auto w-full"
+                    >
+                        {/* Course preferences/options row directly above the input capsule */}
+                        <div className="flex flex-wrap gap-2 mb-3 justify-start px-1 select-none">
+
+                            {/* ── Level Selector (custom popup) ── */}
+                            <div className="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => { setLevelOpen(o => !o); setStyleOpen(false); }}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                                        level !== 'default'
+                                            ? 'bg-primary/15 border-primary/40 text-primary'
+                                            : 'bg-purple-900/20 border-purple-500/15 text-slate-300 hover:border-primary/30 hover:text-slate-100'
+                                    }`}
+                                >
+                                    <BarChart size={13} className="shrink-0" />
+                                    <span>سطح دوره: <span className="font-bold">{{
+                                        default: 'هوشمند', beginner: 'مقدماتی',
+                                        intermediate: 'متوسط', expert: 'پیشرفته', high_expert: 'فوق تخصصی'
+                                    }[level]}</span></span>
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${levelOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
+                                </button>
+                                {levelOpen && (
+                                    <div className="absolute bottom-full mb-2 right-0 z-50 min-w-[160px] bg-[#1a1525] border border-purple-500/20 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-sm">
+                                        <div className="px-3 pt-2.5 pb-1 text-[10px] font-bold text-primary/70 uppercase tracking-widest border-b border-purple-500/10">سطح دوره</div>
+                                        {[['default','هوشمند 🤖','انتخاب خودکار'],['beginner','مقدماتی','شروع از صفر'],['intermediate','متوسط','دانش پایه'],['expert','پیشرفته','تخصصی'],['high_expert','فوق تخصصی','حرفه‌ای']].map(([val, label, sub]) => (
+                                            <button
+                                                key={val} type="button"
+                                                onClick={() => { setLevel(val); setLevelOpen(false); }}
+                                                className={`w-full text-right px-4 py-2.5 flex flex-col gap-0.5 transition-all ${
+                                                    level === val
+                                                        ? 'bg-primary/15 text-primary'
+                                                        : 'text-slate-300 hover:bg-purple-900/30 hover:text-white'
+                                                }`}
+                                            >
+                                                <span className="text-xs font-semibold">{label}</span>
+                                                <span className="text-[10px] opacity-60">{sub}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* ── Learning Style Selector (custom popup) ── */}
+                            <div className="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => { setStyleOpen(o => !o); setLevelOpen(false); }}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                                        learningStyle !== 'default'
+                                            ? 'bg-primary/15 border-primary/40 text-primary'
+                                            : 'bg-purple-900/20 border-purple-500/15 text-slate-300 hover:border-primary/30 hover:text-slate-100'
+                                    }`}
+                                >
+                                    <BookOpen size={13} className="shrink-0" />
+                                    <span>سبک یادگیری: <span className="font-bold">{{
+                                        default: 'هوشمند', practical: 'عملی',
+                                        theoretical: 'تئوری', visual: 'بصری'
+                                    }[learningStyle]}</span></span>
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${styleOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
+                                </button>
+                                {styleOpen && (
+                                    <div className="absolute bottom-full mb-2 right-0 z-50 min-w-[160px] bg-[#1a1525] border border-purple-500/20 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-sm">
+                                        <div className="px-3 pt-2.5 pb-1 text-[10px] font-bold text-primary/70 uppercase tracking-widest border-b border-purple-500/10">سبک یادگیری</div>
+                                        {[['default','هوشمند 🤖','انتخاب خودکار'],['practical','عملی','پروژه‌محور'],['theoretical','تئوری','مفهومی'],['visual','بصری','ویدیو‌محور']].map(([val, label, sub]) => (
+                                            <button
+                                                key={val} type="button"
+                                                onClick={() => { setLearningStyle(val); setStyleOpen(false); }}
+                                                className={`w-full text-right px-4 py-2.5 flex flex-col gap-0.5 transition-all ${
+                                                    learningStyle === val
+                                                        ? 'bg-primary/15 text-primary'
+                                                        : 'text-slate-300 hover:bg-purple-900/30 hover:text-white'
+                                                }`}
+                                            >
+                                                <span className="text-xs font-semibold">{label}</span>
+                                                <span className="text-[10px] opacity-60">{sub}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* ── Sessions count ── */}
+                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                                durationSessions > 0
+                                    ? 'bg-primary/15 border-primary/40 text-primary'
+                                    : 'bg-purple-900/20 border-purple-500/15 text-slate-300'
+                            }`}>
+                                <Clock size={13} className="shrink-0" />
+                                <span>تعداد جلسات:</span>
+                                <input
+                                    type="number"
+                                    min="1" max="50"
+                                    value={durationSessions || ''}
+                                    placeholder="هوشمند"
+                                    onClick={e => e.stopPropagation()}
+                                    onChange={(e) => {
+                                        const val = parseInt(e.target.value);
+                                        setDurationSessions(isNaN(val) ? 0 : val);
+                                    }}
+                                    className="bg-transparent border-0 w-12 text-center focus:ring-0 focus:outline-none placeholder:text-slate-500 p-0 font-bold"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Input Box capsule */}
+                        <div className="bg-dark-lightest/60 border border-purple-500/10 rounded-2xl p-2 shadow-xl hover:border-primary/10 focus-within:border-primary/30 transition-all flex flex-col">
+                            {/* Selected Files Preview in footer */}
+                            {attachedFiles.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mb-2 pb-2 border-b border-purple-500/5 px-1">
+                                    {attachedFiles.map(file => (
+                                        <div key={file.id} className="flex items-center gap-2 bg-dark border border-purple-500/10 rounded-xl p-1.5 pr-2.5 text-[10px] text-slate-300 shadow">
+                                            {file.type === 'image' ? (
+                                                <img src={file.data} className="w-6 h-6 rounded-md object-cover" />
+                                            ) : (
+                                                <div className="w-6 h-6 rounded-md bg-primary/25 flex items-center justify-center text-primary font-mono text-[8px] font-bold">صدا</div>
+                                            )}
+                                            <span className="max-w-[120px] truncate">{file.name}</span>
+                                            <button type="button" onClick={() => removeAttachedFile(file.id)} className="text-slate-400 hover:text-red-400 p-0.5">
+                                                <X size={12} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Voice Recording wave visualizer */}
+                            {isRecording && (
+                                <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-xl p-2 mb-2 text-red-400 text-xs animate-pulse">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                                        <span>در حال ضبط صدا...</span>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-mono font-medium">{recordingTime} ثانیه</span>
+                                        <button 
+                                            type="button" 
+                                            onClick={stopRecording} 
+                                            className="bg-red-500 text-white px-3 py-1 rounded-md text-[10px] font-bold hover:bg-red-600 transition-all"
+                                        >
+                                            توقف
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex items-center gap-1.5">
+                                <input
+                                    type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*,audio/*" multiple className="hidden"
+                                />
+
+                                {/* Voice Record button — LEFT side */}
+                                <button
+                                    type="button"
+                                    onClick={isRecording ? stopRecording : startRecording}
+                                    disabled={isLoading}
+                                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 self-center border ${
+                                        isRecording
+                                            ? 'bg-red-500/20 border-red-500/40 text-red-400 hover:bg-red-500/30'
+                                            : 'bg-purple-900/25 border-purple-500/20 text-purple-300 hover:bg-primary/20 hover:text-primary hover:border-primary/30'
+                                    }`}
+                                    title="ضبط صدا"
+                                >
+                                    <MicIcon size={17} />
+                                </button>
+
+                                {/* Paperclip Attach button — LEFT side */}
+                                <button
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isLoading || isRecording}
+                                    className="w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 self-center border bg-purple-900/25 border-purple-500/20 text-purple-300 hover:bg-primary/20 hover:text-primary hover:border-primary/30 disabled:opacity-40"
+                                    title="پیوست تصویر یا فایل صوتی"
+                                >
+                                    <PaperclipIcon size={17} />
+                                </button>
+
+                                {/* Text Input field — MIDDLE (flex-1) */}
+                                <input
+                                    type="text" value={input} onChange={(e) => setInput(e.target.value)}
+                                    placeholder={pendingCourseData ? 'تغییرات مورد نظر را بنویسید...' : 'پاسخ یا موضوع خود را بنویسید...'}
+                                    className="flex-1 bg-transparent border-0 py-2.5 px-2 text-sm text-slate-200 focus:outline-none focus:ring-0 placeholder:text-slate-500 self-center min-w-0"
+                                    disabled={isLoading || isRecording} autoFocus
+                                    onClick={() => { setLevelOpen(false); setStyleOpen(false); }}
+                                />
+
+                                {/* Send button — RIGHT side, minimal arrow */}
+                                <button
+                                    type="submit"
+                                    disabled={isLoading || isRecording || (!input.trim() && attachedFiles.length === 0)}
+                                    className="w-10 h-10 rounded-xl bg-primary hover:bg-primary/90 active:scale-95 text-white flex items-center justify-center transition-all shrink-0 self-center shadow-[0_0_12px_rgba(168,85,247,0.35)] disabled:opacity-25 disabled:shadow-none"
+                                    title="ارسال"
+                                >
+                                    <ArrowLeftIcon size={17} />
+                                </button>
+                            </div>
+                        </div>
                     </form>
-                    <p className="text-center text-xs text-slate-500 mt-4 font-mono font-medium">Powered by Blue AI Assistant</p>
+                    <p className="text-center text-[10px] text-slate-500 mt-2 font-mono font-medium">Powered by Blue AI Assistant</p>
                 </div>
             </div>
         </div>
@@ -80,9 +450,18 @@ function ChatModal({ messages, input, setInput, isLoading, onSend, onClose, pend
 function CoachFullScreenModal({ messages, input, setInput, isLoading, onSend, onMinimize, onClose, viewingItem, courseColor }) {
     const scrollRef = useRef(null);
     const vColor = courseColor;
+    const prevLenRef = useRef(messages.length);
 
     React.useEffect(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        const container = scrollRef.current;
+        if (container) {
+            const isNewMessage = messages.length > prevLenRef.current;
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+            if (isNewMessage || isNearBottom || isLoading) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        prevLenRef.current = messages.length;
     }, [messages, isLoading]);
 
     return (

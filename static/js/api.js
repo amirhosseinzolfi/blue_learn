@@ -1,9 +1,27 @@
+// Configure request interceptor to automatically add authorization header if token exists
+axios.interceptors.request.use(
+    config => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+        }
+        return config;
+    },
+    error => {
+        return Promise.reject(error);
+    }
+);
+
 // All API calls — returns data or throws
 const api = {
     get: (path) => axios.get(`${API_BASE}${path}`).then(r => r.data),
     post: (path, body, opts) => axios.post(`${API_BASE}${path}`, body, opts).then(r => r.data),
     patch: (path, body) => axios.patch(`${API_BASE}${path}`, body).then(r => r.data),
     delete: (path) => axios.delete(`${API_BASE}${path}`).then(r => r.data),
+
+    login:    (username, password) => api.post('/login', { username, password }),
+    register: (username, password, full_name, age, job_education) => api.post('/register', { username, password, full_name, age, job_education }),
+    fetchMe:  () => api.get('/me'),
 
     fetchCourses:  () => api.get('/courses/'),
     fetchStats:    () => api.get('/stats'),
@@ -12,8 +30,8 @@ const api = {
 
     fetchCourse:      (id) => api.get(`/courses/${id}`),
     fetchChatHistory: (id) => api.get(`/courses/${id}/chat-history`),
-    generateMicro:    (id) => api.post(`/courses/${id}/generate-micro`),
-    generateItem:     (id) => api.post(`/items/${id}/generate`),
+    generateMicro:    (id, generateCover = false) => api.post(`/courses/${id}/generate-micro?generate_cover=${generateCover}`),
+    generateItem:     (id, generateCover = false) => api.post(`/items/${id}/generate?generate_cover=${generateCover}`),
     completeItem:     (id) => api.post(`/items/${id}/complete`),
     syncStudyTime:    (id, seconds) => api.post(`/items/${id}/study-time`, { seconds }),
     deleteCourse:     (id) => api.delete(`/courses/${id}`),
@@ -35,12 +53,18 @@ const api = {
     generateInsight: ()     => api.post('/generate-insight'),
     rebuildProfile:  ()     => api.post('/profile/rebuild'),
 
-    chatCourseGen: (messages) => api.post('/chat/course-generator', { messages }),
+    chatCourseGen: (messages, level = null, duration_sessions = null, learning_style = null) => 
+        api.post('/chat/course-generator', { messages, level, duration_sessions, learning_style }),
 
     coachStream: async (courseId, itemId, message, onChunk) => {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = localStorage.getItem('token');
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
         const res = await fetch(`${API_BASE}/chat/coach`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({ message, course_id: courseId, item_id: itemId })
         });
         if (!res.ok) throw new Error('Network error');

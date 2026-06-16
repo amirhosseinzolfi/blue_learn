@@ -126,11 +126,20 @@ function CourseRoadmap({ course, sColor, onItemClick, viewingItem }) {
                                 </div>
 
                                 {/* Main Session Title */}
-                                <h4 className={`text-lg font-bold leading-[1.6] mb-8 flex-1 transition-all duration-300
+                                <h4 className={`text-lg font-bold leading-[1.6] mb-3 flex-1 transition-all duration-300
                                     ${isCompleted ? 'text-slate-500 group-hover:text-slate-300' : 'text-slate-100 group-hover:text-white'}
                                     ${isEnglish(item.title) ? 'ltr-content' : ''}`}>
                                     {item.title}
                                 </h4>
+                                
+                                {/* Session Description */}
+                                {item.description && (
+                                    <p className={`text-xs text-slate-400 leading-relaxed mb-4 line-clamp-2 ${isEnglish(item.description) ? 'ltr-content' : ''}`}>
+                                        {item.description}
+                                    </p>
+                                )}
+                                
+
 
                                 {/* Gamified Footer Section */}
                                 <div className="mt-auto pt-6 border-t border-white/5 flex items-center justify-between">

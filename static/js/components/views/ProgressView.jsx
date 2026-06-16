@@ -7,10 +7,252 @@ const {
 const Chart = window.ReactApexChart;
 const { useState, useEffect, useCallback, useRef } = window.React;
 
+function ConstellationGraph({ nodes, onNodeSelect, selectedNode }) {
+    const containerRef = useRef(null);
+    const networkRef = useRef(null);
+    const dataRef = useRef(null);
+
+    useEffect(() => {
+        if (!containerRef.current || !nodes || nodes.length === 0) return;
+
+        // 1. Prepare Nodes and Edges Data
+        const visNodes = [];
+        const visEdges = [];
+
+        nodes.forEach(n => {
+            const masteryPct = Math.round(n.mastery_score * 100);
+            
+            // Neon glowing colors based on mastery & category
+            let nodeColor = {
+                background: 'rgba(16, 185, 129, 0.15)', // Emerald/Green for high mastery
+                border: '#10b981',
+                highlight: { background: 'rgba(16, 185, 129, 0.35)', border: '#34d399' },
+                hover: { background: 'rgba(16, 185, 129, 0.25)', border: '#34d399' }
+            };
+
+            if (n.mastery_score < 0.3) {
+                // Purple for beginners
+                nodeColor = {
+                    background: 'rgba(168, 85, 247, 0.15)',
+                    border: '#a855f7',
+                    highlight: { background: 'rgba(168, 85, 247, 0.35)', border: '#c084fc' },
+                    hover: { background: 'rgba(168, 85, 247, 0.25)', border: '#c084fc' }
+                };
+            } else if (n.mastery_score < 0.7) {
+                // Blue for intermediates
+                nodeColor = {
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    border: '#3b82f6',
+                    highlight: { background: 'rgba(59, 130, 246, 0.35)', border: '#60a5fa' },
+                    hover: { background: 'rgba(59, 130, 246, 0.25)', border: '#60a5fa' }
+                };
+            }
+
+            // Sizing scales with mastery
+            const size = 18 + n.mastery_score * 18;
+
+            visNodes.push({
+                id: n.concept,
+                label: n.concept,
+                title: `${n.concept} (${n.category}) - ${masteryPct}% تسلط`,
+                value: n.mastery_score,
+                size: size,
+                color: nodeColor,
+                font: {
+                    color: '#e2e8f0',
+                    face: 'Vazirmatn, Inter, sans-serif',
+                    size: 11,
+                    bold: { color: '#ffffff', size: 12, face: 'Vazirmatn' }
+                },
+                shadow: {
+                    enabled: true,
+                    color: nodeColor.border,
+                    size: 12,
+                    x: 0,
+                    y: 0
+                },
+                borderWidth: 2,
+                borderWidthSelected: 4,
+                shape: 'dot'
+            });
+
+            // Create connections (prerequisites)
+            if (n.prerequisites && Array.isArray(n.prerequisites)) {
+                n.prerequisites.forEach(prereq => {
+                    const exists = nodes.some(x => x.concept === prereq);
+                    if (exists) {
+                        visEdges.push({
+                            id: `${prereq}-${n.concept}`,
+                            from: prereq,
+                            to: n.concept,
+                            arrows: {
+                                to: { enabled: true, scaleFactor: 0.4 }
+                            },
+                            color: {
+                                color: 'rgba(255, 255, 255, 0.08)',
+                                highlight: '#10b981',
+                                hover: '#34d399'
+                            },
+                            width: 1.5,
+                            selectionWidth: 3.5,
+                            smooth: {
+                                type: 'curvedCCW',
+                                roundness: 0.15
+                            }
+                        });
+                    }
+                });
+            }
+        });
+
+        // Initialize vis datasets
+        const visNodesSet = new window.vis.DataSet(visNodes);
+        const visEdgesSet = new window.vis.DataSet(visEdges);
+        dataRef.current = { nodes: visNodesSet, edges: visEdgesSet };
+
+        const options = {
+            nodes: {
+                scaling: { min: 12, max: 35 }
+            },
+            edges: {
+                hoverWidth: 2.5
+            },
+            physics: {
+                solver: 'barnesHut',
+                barnesHut: {
+                    gravitationalConstant: -2800,
+                    centralGravity: 0.25,
+                    springLength: 140,
+                    springConstant: 0.04,
+                    damping: 0.095,
+                    avoidOverlap: 0.95
+                },
+                stabilization: {
+                    enabled: true,
+                    iterations: 100,
+                    fit: true
+                }
+            },
+            interaction: {
+                hover: true,
+                zoomView: true,
+                dragView: true,
+                dragNodes: true,
+                tooltipDelay: 200
+            }
+        };
+
+        const network = new window.vis.Network(containerRef.current, { nodes: visNodesSet, edges: visEdgesSet }, options);
+        networkRef.current = network;
+
+        // Register Node Click selection
+        network.on("selectNode", (params) => {
+            const nodeId = params.nodes[0];
+            const conceptNode = nodes.find(n => n.concept === nodeId);
+            if (conceptNode) {
+                onNodeSelect(conceptNode);
+
+                // Dynamically highlight direct connecting paths
+                const edgeUpdates = visEdges.map(edge => {
+                    const isDirect = edge.from === nodeId || edge.to === nodeId;
+                    return {
+                        id: edge.id,
+                        color: {
+                            color: isDirect ? '#10b981' : 'rgba(255, 255, 255, 0.02)'
+                        },
+                        width: isDirect ? 3.5 : 1.0
+                    };
+                });
+                visEdgesSet.update(edgeUpdates);
+            }
+        });
+
+        network.on("deselectNode", () => {
+            onNodeSelect(null);
+            // Restore default translucent edges
+            const edgeResets = visEdges.map(edge => ({
+                id: edge.id,
+                color: {
+                    color: 'rgba(255, 255, 255, 0.08)'
+                },
+                width: 1.5
+            }));
+            visEdgesSet.update(edgeResets);
+        });
+
+        return () => {
+            if (networkRef.current) {
+                networkRef.current.destroy();
+                networkRef.current = null;
+            }
+        };
+    }, [nodes]);
+
+    // Handle focus zoom when selectedNode changes externally (e.g. from sidebar clicks)
+    useEffect(() => {
+        if (!networkRef.current || !selectedNode) return;
+        try {
+            networkRef.current.selectNodes([selectedNode.concept]);
+            networkRef.current.focus(selectedNode.concept, {
+                scale: 1.1,
+                animation: {
+                    duration: 900,
+                    easingFunction: "easeInOutQuad"
+                }
+            });
+
+            // Highlight connections for this programmatically focused node
+            if (dataRef.current && dataRef.current.edges) {
+                const nodeId = selectedNode.concept;
+                const edgeUpdates = [];
+                dataRef.current.edges.forEach(edge => {
+                    const isDirect = edge.from === nodeId || edge.to === nodeId;
+                    edgeUpdates.push({
+                        id: edge.id,
+                        color: {
+                            color: isDirect ? '#10b981' : 'rgba(255, 255, 255, 0.02)'
+                        },
+                        width: isDirect ? 3.5 : 1.0
+                    });
+                });
+                dataRef.current.edges.update(edgeUpdates);
+            }
+        } catch (err) {
+            console.warn("Could not focus node in Vis.js graph", err);
+        }
+    }, [selectedNode]);
+
+    return (
+        <div className="w-full h-full min-h-[350px] md:min-h-[420px] rounded-[2rem] border border-white/[0.04] bg-[#080811] relative overflow-hidden shadow-2xl">
+            {/* Ambient background glow dots for a cosmic stellar feel */}
+            <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-indigo-500/[0.06] rounded-full blur-[80px] pointer-events-none" />
+            <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-emerald-500/[0.05] rounded-full blur-[80px] pointer-events-none" />
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.01)_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
+            <div ref={containerRef} className="w-full h-full absolute inset-0 bg-transparent z-10" style={{ direction: 'ltr' }} />
+        </div>
+    );
+}
+
+const ALL_WIDGETS = [
+    { id: 'chart', label: 'تحلیل فعالیت روزانه', defaultCol: 'main' },
+    { id: 'insights', label: 'تحلیل هوشمند دانش (بینش‌ها)', defaultCol: 'main' },
+    { id: 'knowledge_nodes', label: 'نقشه کهکشانی مفاهیم و ارتباطات', defaultCol: 'main' },
+    { id: 'learning_style', label: 'سبک یادگیری شخصی', defaultCol: 'main' },
+    { id: 'cognitive', label: 'پروفایل شناختی و هوشمند کاربر', defaultCol: 'side' },
+    { id: 'strengths', label: 'نقاط قوت و علایق', defaultCol: 'side' },
+    { id: 'recommendations', label: 'مسیر یادگیری پیشنهادی', defaultCol: 'side' },
+    { id: 'recent', label: 'جلسات اخیر', defaultCol: 'side' },
+    { id: 'badges', label: 'نشان‌های افتخار', defaultCol: 'side' }
+];
+
 function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, onSessionClick, visibleSeries, setVisibleSeries, chartPopup, setChartPopup, popupHovered, setPopupHovered, fetchStats, showToast }) {
 
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [selectedNode, setSelectedNode] = useState(null);
+    const [nodeSearch, setNodeSearch] = useState('');
+    const [isWidgetModalOpen, setIsWidgetModalOpen] = useState(false);
+    const [showAllStrengths, setShowAllStrengths] = useState(false);
     const menuRef = useRef(null);
 
     useEffect(() => {
@@ -37,6 +279,24 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
         } finally {
             setIsSyncing(false);
         }
+    };
+
+    const toggleWidgetVisibility = (widgetId) => {
+        setLayout(prev => {
+            const isCurrentlyVisible = prev.main.includes(widgetId) || prev.side.includes(widgetId);
+            const newLayout = { main: [...prev.main], side: [...prev.side] };
+            if (isCurrentlyVisible) {
+                // Hide it
+                newLayout.main = newLayout.main.filter(id => id !== widgetId);
+                newLayout.side = newLayout.side.filter(id => id !== widgetId);
+            } else {
+                // Show it by adding it to its default column
+                const widgetDef = ALL_WIDGETS.find(w => w.id === widgetId);
+                const col = widgetDef ? widgetDef.defaultCol : 'side';
+                newLayout[col].push(widgetId);
+            }
+            return newLayout;
+        });
     };
 
     const activityData = stats.activity_data || [];
@@ -72,7 +332,7 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
     // Layout configuration
     const defaultLayout = {
         main: ['chart', 'insights', 'knowledge_nodes', 'learning_style'],
-        side: ['user_info', 'cognitive', 'strengths', 'recommendations', 'recent', 'level', 'badges']
+        side: ['cognitive', 'strengths', 'recommendations', 'recent', 'badges']
     };
     const [layout, setLayout] = useState(() => {
         try {
@@ -382,25 +642,7 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                     </div>
                 );
             case 'level':
-                return (
-                    <div className="bg-gradient-to-br from-primary/30 to-indigo-600/30 border border-primary/40 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden h-full">
-                        <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-primary/20 rounded-full blur-3xl" />
-                        <h3 className="text-xl font-bold text-white mb-4 relative z-10 flex items-center gap-2">
-                            <Trophy size={20} className="text-yellow-500" /> سطح یادگیری
-                        </h3>
-                        <div className="flex items-end gap-2 mb-6 relative z-10">
-                            <span className="text-6xl font-black text-white">سطح {Math.floor(stats.total_study_time / 3600) + 1}</span>
-                            <span className="text-primary-light font-bold mb-2">حرفه‌ای</span>
-                        </div>
-                        <div className="w-full bg-black/30 h-3 rounded-full overflow-hidden mb-3 relative z-10 border border-white/10">
-                            <div className="bg-gradient-to-r from-primary to-purple-400 h-full transition-all duration-1000 shadow-[0_0_15px_rgba(168,85,247,0.5)]"
-                                style={{ width: `${(stats.total_study_time % 3600) / 36}%` }} />
-                        </div>
-                        <p className="text-slate-300 text-xs font-medium relative z-10">
-                            {Math.floor((3600 - (stats.total_study_time % 3600)) / 60)} دقیقه تا سطح بعدی
-                        </p>
-                    </div>
-                );
+                return null;
             case 'badges':
                 return (
                     <div className="bg-dark-lighter border border-white/[0.05] rounded-[2.5rem] p-8 shadow-2xl h-full">
@@ -421,13 +663,49 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                 );
             case 'cognitive': {
                 const cp = stats.cognitive_profile || {};
-                const topInterests = cp.interests?.slice(0, 3) || [];
+                const uInfo = stats.user_info || {};
+                
+                // Progress calculations for integrated level road
+                const levelNum = Math.floor((stats.total_study_time || 0) / 3600) + 1;
+                const levelProgress = ((stats.total_study_time || 0) % 3600) / 36; // percentage of current hour progress
+                const minsToNext = Math.max(0, Math.floor((3600 - ((stats.total_study_time || 0) % 3600)) / 60));
+                
                 return (
                     <div className="bg-dark-lighter border border-indigo-500/20 rounded-[2.5rem] p-7 shadow-2xl relative overflow-hidden h-full">
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
-                        <h3 className="text-lg font-bold text-white mb-5 flex items-center gap-3">
-                            <Bot size={20} className="text-indigo-400" /> پروفایل شناختی هوش مصنوعی
-                        </h3>
+                        
+                        {/* Combined Header using user's name from user profile card */}
+                        <div className="flex items-center gap-4 mb-4">
+                            <div className="w-12 h-12 bg-primary/20 rounded-full flex items-center justify-center border border-primary/30 shrink-0">
+                                <User size={20} className="text-primary" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <h3 className="text-base font-bold text-white leading-tight truncate">{uInfo.name || 'کاربر مهمان'}</h3>
+                                <p className="text-[10px] text-slate-400 mt-0.5">پروفایل هوشمند و وضعیت شناختی</p>
+                            </div>
+                        </div>
+
+                        {/* Integrated Learning Level Progress Road */}
+                        <div className="mb-5 p-3.5 bg-gradient-to-br from-indigo-950/30 to-purple-950/20 border border-indigo-500/10 rounded-2xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-20 h-20 bg-primary/5 rounded-full blur-xl pointer-events-none" />
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                                    <Trophy size={14} className="text-yellow-500" /> سطح {levelNum}
+                                </span>
+                                <span className="text-[9px] text-indigo-200/60 font-semibold bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">جوینده مهار‌ت</span>
+                            </div>
+                            <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden border border-white/5 relative mb-2">
+                                <div 
+                                    className="bg-gradient-to-r from-primary via-indigo-400 to-purple-400 h-full rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(168,85,247,0.3)]"
+                                    style={{ width: `${levelProgress}%` }}
+                                />
+                            </div>
+                            <div className="flex justify-between items-center text-[9px] text-slate-400">
+                                <span>تا سطح بعدی:</span>
+                                <span className="font-semibold text-slate-300">{minsToNext} دقیقه مطالعه باقی‌مانده</span>
+                            </div>
+                        </div>
+
                         {!stats.cognitive_profile ? (
                             <div className="flex flex-col items-center justify-center py-10 text-center opacity-50">
                                 <Bot size={40} className="mb-3 text-indigo-400" />
@@ -469,129 +747,247 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                                         ))}
                                     </div>
                                 )}
-                                {/* Interests */}
-                                {topInterests.length > 0 && (
-                                    <div>
-                                        <p className="text-[10px] text-slate-500 font-medium mb-2">🔥 علایق برجسته</p>
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {topInterests.slice(0,5).map((interest, idx) => (
-                                                <span key={idx} className="text-[10px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded-lg">{interest}</span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
                             </div>
                         )}
                     </div>
                 );
             }
             case 'user_info': {
-                const uInfo = stats.user_info || {};
-                return (
-                    <div className="bg-dark-lighter border border-white/[0.05] rounded-[2.5rem] p-8 shadow-2xl h-full">
-                        <div className="flex items-center gap-4 mb-6">
-                            <div className="w-14 h-14 bg-primary/20 rounded-full flex items-center justify-center border border-primary/30">
-                                <User size={24} className="text-primary" />
-                            </div>
-                            <div>
-                                <h3 className="text-lg font-bold text-white">{uInfo.name || 'کاربر مهمان'}</h3>
-                                <p className="text-xs text-slate-400">{uInfo.education_level || 'اطلاعات تحصیلی ثبت نشده'}</p>
-                            </div>
-                        </div>
-                        <div className="space-y-4">
-                            <div className="bg-white/[0.02] rounded-2xl p-4 border border-white/[0.02]">
-                                <p className="text-[10px] text-slate-500 mb-1">اهداف اصلی</p>
-                                <p className="text-sm text-slate-200">{uInfo.primary_goals || 'نامشخص (از تنظیمات تکمیل کنید)'}</p>
-                            </div>
-                            <div className="bg-white/[0.02] rounded-2xl p-4 border border-white/[0.02]">
-                                <p className="text-[10px] text-slate-500 mb-1">پیش‌زمینه و مهارت‌ها</p>
-                                <p className="text-sm text-slate-200">{uInfo.background_experience || 'نامشخص'}</p>
-                            </div>
-                        </div>
-                    </div>
-                );
+                return null;
             }
             case 'knowledge_nodes': {
                 const nodes = stats.knowledge_nodes || [];
+                const filteredNodes = nodes.filter(n => 
+                    n.concept.toLowerCase().includes(nodeSearch.toLowerCase()) || 
+                    n.category.toLowerCase().includes(nodeSearch.toLowerCase())
+                );
+                
                 return (
-                    <div className="bg-dark-lighter border border-emerald-500/20 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden h-full flex flex-col">
+                    <div className="bg-dark-lighter border border-emerald-500/10 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden h-full flex flex-col min-h-[550px]">
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600" />
-                        <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
-                            <BookOpen size={22} className="text-emerald-400" /> نقشه مفاهیم و مهارت‌ها
-                        </h3>
                         
-                        {nodes.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center flex-1 text-center opacity-50">
-                                <BookOpen size={48} className="mb-4 text-emerald-400" />
-                                <p className="text-sm text-white font-bold">هنوز مهارتی استخراج نشده</p>
-                                <p className="text-xs text-slate-400 mt-2">با کامل کردن دروس، هوش مصنوعی مفاهیم یادگرفته شده را در اینجا ترسیم می‌کند.</p>
-                            </div>
-                        ) : (
-                        <div className="flex-1 flex flex-col xl:flex-row gap-6">
-                            {/* Radar Chart */}
-                            <div className="w-full xl:w-1/2 flex items-center justify-center -mt-8">
-                                <Chart 
-                                    type="radar" 
-                                    options={{
-                                        chart: { 
-                                            type: 'radar', 
-                                            toolbar: { show: false }, 
-                                            fontFamily: 'Vazirmatn, Inter, sans-serif', 
-                                            background: 'transparent',
-                                            dropShadow: { enabled: true, blur: 8, left: 0, top: 0, opacity: 0.2 }
-                                        },
-                                        xaxis: { 
-                                            categories: nodes.map(n => n.concept), 
-                                            labels: { 
-                                                style: { colors: Array(nodes.length).fill('#94a3b8'), fontSize: '10px', fontWeight: 'bold' },
-                                                formatter: function (val) {
-                                                    return val && val.length > 12 ? val.substring(0, 12) + '...' : val;
-                                                }
-                                            } 
-                                        },
-                                        yaxis: { show: false, min: 0, max: 100, tickAmount: 5 },
-                                        plotOptions: {
-                                            radar: {
-                                                polygons: {
-                                                    strokeColors: 'rgba(255,255,255,0.05)',
-                                                    strokeWidth: 1,
-                                                    connectorColors: 'rgba(255,255,255,0.05)',
-                                                    fill: { colors: ['transparent'] }
-                                                }
-                                            }
-                                        },
-                                        stroke: { width: 2, colors: ['#10b981'], curve: 'smooth' },
-                                        fill: { opacity: 0.3, colors: ['#10b981'] },
-                                        markers: { size: 3, colors: ['#059669'], strokeColors: '#10b981', strokeWidth: 1, hover: { size: 6 } },
-                                        theme: { mode: 'dark' },
-                                        tooltip: { 
-                                            theme: 'dark',
-                                            y: { formatter: function(val) { return val + "%" } },
-                                            x: { formatter: function(val) { return val; } }
-                                        }
-                                    }} 
-                                    series={[{ name: 'میزان تسلط', data: nodes.map(n => Math.round(n.mastery_score * 100)) }]} 
-                                    width="100%" 
-                                    height={300} 
-                                />
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                            <div>
+                                <h3 className="text-xl font-bold text-white flex items-center gap-3">
+                                    <BookOpen size={22} className="text-emerald-400" /> نقشه کهکشانی مفاهیم و ارتباطات دانش
+                                </h3>
+                                <p className="text-slate-400 text-xs mt-1">
+                                    تحلیل گراف ارتباطات، پیش‌نیازها و میزان تسلط شما بر مفاهیم آموزشی استخراج شده توسط هوش مصنوعی
+                                </p>
                             </div>
                             
-                            {/* Concept List */}
-                            <div className="w-full xl:w-1/2 flex flex-col gap-2.5 overflow-y-auto max-h-[260px] custom-scrollbar pr-2">
-                                {nodes.map((node, idx) => (
-                                    <div key={idx} className="bg-emerald-500/5 border border-emerald-500/10 p-3 rounded-2xl flex justify-between items-center group hover:bg-emerald-500/15 transition-all hover:scale-[1.02]">
-                                        <div className="flex flex-col w-[60%]">
-                                            <span className="text-[12px] font-bold text-slate-200 group-hover:text-emerald-300 transition-colors truncate" title={node.concept}>{node.concept}</span>
-                                            <span className="text-[9px] text-emerald-500/70 font-mono mt-0.5 truncate">{node.category}</span>
-                                        </div>
-                                        <div className="flex items-center gap-3 w-[40%] justify-end">
-                                            <div className="w-16 bg-black/40 h-1.5 rounded-full overflow-hidden">
-                                                <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" style={{ width: `${node.mastery_score * 100}%` }} />
+                            {selectedNode && (
+                                <button 
+                                    onClick={() => setSelectedNode(null)} 
+                                    className="bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 self-start sm:self-center"
+                                >
+                                    <X size={14} /> ریست تمرکز گراف
+                                </button>
+                            )}
+                        </div>
+                        
+                        {nodes.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center flex-1 text-center py-20 bg-white/[0.01] rounded-[2rem] border border-dashed border-white/5">
+                                <BookOpen size={48} className="mb-4 text-emerald-400/50 animate-pulse" />
+                                <p className="text-sm text-white font-bold">هنوز مهارتی استخراج نشده است</p>
+                                <p className="text-xs text-slate-500 mt-2 max-w-sm leading-relaxed">
+                                    با کامل کردن اولین جلسات و ایجاد دوره‌های جدید، هوش مصنوعی مفاهیم یادگرفته شده و ساختار درختی روابط آن‌ها را در اینجا ترسیم می‌کند.
+                                </p>
+                            </div>
+                        ) : (
+                        <div className="flex-1 flex flex-col lg:flex-row gap-6">
+                            {/* Constellation Network Graph */}
+                            <div className="w-full lg:w-[62%] h-[380px] md:h-[450px] flex flex-col relative group">
+                                <ConstellationGraph 
+                                    nodes={nodes} 
+                                    onNodeSelect={setSelectedNode} 
+                                    selectedNode={selectedNode} 
+                                />
+                                <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 text-[9px] text-slate-400 pointer-events-none">
+                                    🔍 بزرگ‌نمایی: اسکرول | جابجایی: درگ روی پس‌زمینه
+                                </div>
+                            </div>
+                            
+                            {/* Contextual Sidebar Dashboard */}
+                            <div className="w-full lg:w-[38%] flex flex-col bg-white/[0.01] border border-white/[0.04] p-5 rounded-[2rem] h-[380px] md:h-[450px] overflow-hidden">
+                                {!selectedNode ? (
+                                    // Search & Concept List View
+                                    <div className="flex flex-col h-full">
+                                        <div className="relative mb-4">
+                                            <input 
+                                                type="text" 
+                                                value={nodeSearch}
+                                                onChange={(e) => setNodeSearch(e.target.value)}
+                                                placeholder="جستجوی مفاهیم و مهارت‌ها..." 
+                                                className="w-full bg-white/[0.02] border border-white/10 rounded-xl py-2 px-3 pl-8 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 transition-all font-medium"
+                                            />
+                                            <div className="absolute left-2.5 top-2.5 text-slate-500">
+                                                🔍
                                             </div>
-                                            <span className="text-[11px] font-black text-emerald-400 w-7 text-right">{Math.round(node.mastery_score * 100)}%</span>
+                                        </div>
+                                        
+                                        <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar">
+                                            {filteredNodes.length > 0 ? filteredNodes.map((node, idx) => {
+                                                const scorePct = Math.round(node.mastery_score * 100);
+                                                let theme = { text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' };
+                                                if (node.mastery_score >= 70) theme = { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' };
+                                                else if (node.mastery_score >= 30) theme = { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' };
+
+                                                return (
+                                                    <div 
+                                                        key={idx} 
+                                                        onClick={() => setSelectedNode(node)}
+                                                        className={`p-3 rounded-xl border border-white/[0.03] bg-white/[0.01] hover:bg-white/[0.03] cursor-pointer flex items-center justify-between transition-all duration-300 group hover:scale-[1.01]`}
+                                                    >
+                                                        <div className="flex flex-col min-w-0 flex-1 pl-3">
+                                                            <span className="text-xs font-bold text-slate-200 group-hover:text-white truncate">{node.concept}</span>
+                                                            <span className="text-[9px] text-slate-500 mt-0.5 truncate">{node.category}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`text-[10px] font-black ${theme.text} ${theme.bg} ${theme.border} border px-2 py-0.5 rounded-lg`}>
+                                                                {scorePct}%
+                                                            </span>
+                                                            <ChevronLeft size={12} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }) : (
+                                                <div className="text-center py-10 opacity-40">
+                                                    <p className="text-xs text-slate-400">مهارتی یافت نشد.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        <div className="mt-4 pt-3 border-t border-white/[0.04] text-[10px] text-slate-500 leading-relaxed">
+                                            💡 <strong>راهنما:</strong> برای مشاهده پیش‌نیازها و رشته‌های اتصالی مفاهیم، روی گره‌های دایره‌ای در نقشه کهکشانی کلیک کنید.
                                         </div>
                                     </div>
-                                ))}
+                                ) : (
+                                    // Selected Concept Detailed Dashboard
+                                    <div className="flex flex-col h-full justify-between">
+                                        <div className="space-y-5 overflow-y-auto custom-scrollbar pr-1">
+                                            {/* Header Pill & Name */}
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="text-[9px] font-black tracking-wider uppercase px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                            {selectedNode.category}
+                                                        </span>
+                                                        {(() => {
+                                                            const diff = selectedNode.difficulty_level || "مقدماتی";
+                                                            let diffClass = "bg-sky-500/10 text-sky-400 border-sky-500/20";
+                                                            if (diff === "متوسط") diffClass = "bg-indigo-500/10 text-indigo-400 border-indigo-500/20";
+                                                            else if (diff === "پیشرفته") diffClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+                                                            return (
+                                                                <span className={`text-[9px] font-black tracking-wider px-2.5 py-1 rounded-full border ${diffClass}`}>
+                                                                    {diff}
+                                                                </span>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                    <h4 className="text-lg font-black text-white mt-2 leading-snug drop-shadow-[0_0_8px_rgba(255,255,255,0.1)]">
+                                                        {selectedNode.concept}
+                                                    </h4>
+                                                </div>
+                                                <button 
+                                                    onClick={() => setSelectedNode(null)}
+                                                    className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+
+                                            {/* Mastery Progress Tracker */}
+                                            <div className="bg-white/[0.02] border border-white/[0.03] p-4 rounded-2xl">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="text-[10px] text-slate-400 font-bold">سطح تسلط مفهومی</span>
+                                                    <span className={`text-xs font-black ${
+                                                        selectedNode.mastery_score >= 0.7 
+                                                            ? 'text-emerald-400' 
+                                                            : selectedNode.mastery_score >= 0.3 
+                                                                ? 'text-blue-400' 
+                                                                : 'text-purple-400'
+                                                    }`}>
+                                                        {Math.round(selectedNode.mastery_score * 100)}%
+                                                    </span>
+                                                </div>
+                                                <div className="w-full bg-black/45 h-2 rounded-full overflow-hidden border border-white/5">
+                                                    <div 
+                                                        className={`h-full rounded-full transition-all duration-700 ${
+                                                            selectedNode.mastery_score >= 0.7 
+                                                                ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]' 
+                                                                : selectedNode.mastery_score >= 0.3
+                                                                    ? 'bg-gradient-to-r from-blue-500 to-cyan-400 shadow-[0_0_10px_rgba(59,130,246,0.5)]'
+                                                                    : 'bg-gradient-to-r from-purple-500 to-indigo-400 shadow-[0_0_10px_rgba(168,85,247,0.5)]'
+                                                        }`} 
+                                                        style={{ width: `${selectedNode.mastery_score * 100}%` }} 
+                                                    />
+                                                </div>
+                                                
+                                                <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/[0.03] text-[9px] text-slate-500 font-mono">
+                                                    <span>دقت ارزیابی هوش مصنوعی</span>
+                                                    <span className="font-bold text-slate-300">{Math.round(selectedNode.confidence_level * 100)}%</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Key Terms Section */}
+                                            {selectedNode.key_terms && selectedNode.key_terms.length > 0 && (
+                                                <div className="space-y-2">
+                                                    <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1.5">
+                                                        اصطلاحات و مباحث کلیدی
+                                                    </span>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {selectedNode.key_terms.map((term, tIdx) => (
+                                                            <span key={tIdx} className="text-[10px] font-semibold bg-white/[0.02] text-slate-300 border border-white/[0.06] px-2.5 py-1 rounded-lg hover:scale-[1.03] hover:bg-white/[0.05] transition-all cursor-default">
+                                                                {term}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Prerequisites Section */}
+                                            <div className="space-y-2">
+                                                <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1.5">
+                                                    🧭 مفاهیم پیش‌نیاز مستقیم
+                                                </span>
+                                                {selectedNode.prerequisites && selectedNode.prerequisites.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {selectedNode.prerequisites.map((prereq, pIdx) => {
+                                                            const prereqNode = nodes.find(n => n.concept === prereq);
+                                                            return (
+                                                                <button 
+                                                                    key={pIdx}
+                                                                    onClick={() => prereqNode && setSelectedNode(prereqNode)}
+                                                                    className="bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 active:scale-95"
+                                                                    disabled={!prereqNode}
+                                                                >
+                                                                    <span>{prereq}</span>
+                                                                    {prereqNode && <ChevronLeft size={10} />}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-[11px] text-slate-500 italic font-medium pr-1">
+                                                        مفهوم پایه‌ای و بنیادی (بدون پیش‌نیاز ثبت شده)
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Action / Suggestions */}
+                                        <div className="mt-4 pt-4 border-t border-white/[0.04]">
+                                            <div className="bg-emerald-500/5 rounded-xl p-3 border border-emerald-500/10 text-[10px] text-slate-300 leading-relaxed">
+                                                ⚡ <strong>پیشنهاد مربی هوشمند:</strong> 
+                                                {selectedNode.mastery_score < 0.5 
+                                                    ? ` برای افزایش میزان تسلط بر مفهوم «${selectedNode.concept}»، پیشنهاد می‌شود جلسات آموزشی نیمه‌کاره مرتبط با موضوع را مطالعه و تمرین‌های عملی را تکمیل نمایید.`
+                                                    : ` شما تسلط عالی بر «${selectedNode.concept}» دارید! هوش مصنوعی پیشنهاد می‌کند از این مفهوم در پروژه‌های بزرگ‌تر استفاده کرده و مفاهیم پیشرفته پیشنهادی را به عنوان مرز بعدی دنبال کنید.`
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         )}
@@ -603,27 +999,27 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                 const ls = cp2.cognitive_data?.learning_style || {};
                 const styleSummary = cp2.learning_style_summary || '';
                 const styleItems = [
-                    { key: 'hands_on', label: 'عملی / پروژه‌محور', color: 'from-orange-500 to-amber-400', icon: '🔧' },
-                    { key: 'visual', label: 'بصری / نموداری', color: 'from-blue-500 to-cyan-400', icon: '📈' },
-                    { key: 'theoretical', label: 'نظری / مفهومی', color: 'from-purple-500 to-violet-400', icon: '📚' },
-                    { key: 'self_directed', label: 'مستقل / خودراه', color: 'from-emerald-500 to-teal-400', icon: '🎯' },
+                    { key: 'hands_on', label: 'عملی / پروژه‌محور', color: 'from-indigo-600 to-indigo-400', icon: '🔧' },
+                    { key: 'visual', label: 'بصری / نموداری', color: 'from-blue-600 to-blue-400', icon: '📈' },
+                    { key: 'theoretical', label: 'نظری / مفهومی', color: 'from-purple-600 to-purple-400', icon: '📚' },
+                    { key: 'self_directed', label: 'مستقل / خودراه', color: 'from-sky-600 to-sky-400', icon: '🎯' },
                 ];
                 return (
-                    <div className="bg-dark-lighter border border-amber-500/20 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden h-full">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600" />
+                    <div className="bg-dark-lighter border border-indigo-500/20 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden h-full">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary via-indigo-500 to-blue-500" />
                         <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
-                            <Sparkles size={22} className="text-amber-400" /> سبک یادگیری شخصی
+                            <Sparkles size={22} className="text-primary-light" /> سبک یادگیری شخصی
                         </h3>
                         {!stats.cognitive_profile ? (
                             <div className="flex flex-col items-center justify-center py-10 text-center opacity-50">
-                                <Sparkles size={40} className="mb-3 text-amber-400" />
+                                <Sparkles size={40} className="mb-3 text-primary-light" />
                                 <p className="text-sm text-slate-400">پس از تکمیل دروس مشخص می‌شود.</p>
                             </div>
                         ) : (
                         <div className="space-y-5">
                             {styleSummary && (
-                                <div className="bg-amber-500/5 border border-amber-500/15 rounded-2xl p-4">
-                                    <p className="text-[11px] text-amber-300/80 leading-relaxed">{styleSummary}</p>
+                                <div className="bg-indigo-500/5 border border-indigo-500/15 rounded-2xl p-4">
+                                    <p className="text-[11px] text-indigo-200/80 leading-relaxed">{styleSummary}</p>
                                 </div>
                             )}
                             {styleItems.map(({ key, label, color, icon }) => {
@@ -649,19 +1045,23 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                 const cp3 = stats.cognitive_profile || {};
                 const strengths = cp3.strength_areas || [];
                 const interests = cp3.interests || [];
+                
+                const visibleStrengths = showAllStrengths ? strengths : strengths.slice(0, 4);
+                const visibleInterests = showAllStrengths ? interests : interests.slice(0, 4);
+
                 return (
-                    <div className="bg-dark-lighter border border-rose-500/20 rounded-[2.5rem] p-7 shadow-2xl relative overflow-hidden h-full">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600" />
+                    <div className="bg-dark-lighter border border-emerald-500/20 rounded-[2.5rem] p-7 shadow-2xl relative overflow-hidden h-full">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600" />
                         <h3 className="text-lg font-bold text-white mb-5 flex items-center gap-3">
-                            <Trophy size={20} className="text-rose-400" /> نقاط قوت و علایق
+                            <Trophy size={20} className="text-emerald-400" /> نقاط قوت و علایق
                         </h3>
                         <div className="space-y-4">
                             {strengths.length > 0 && (
                                 <div>
                                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-3">🏆 حوزه‌های قدرت</p>
                                     <div className="flex flex-wrap gap-2">
-                                        {strengths.map((s, i) => (
-                                            <span key={i} className="text-[11px] font-semibold bg-rose-500/10 text-rose-300 border border-rose-500/20 px-3 py-1.5 rounded-xl">{s}</span>
+                                        {visibleStrengths.map((s, i) => (
+                                            <span key={i} className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-3 py-1.5 rounded-xl">{s}</span>
                                         ))}
                                     </div>
                                 </div>
@@ -670,7 +1070,7 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                                 <div>
                                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-3">🔍 علایق برجسته</p>
                                     <div className="flex flex-wrap gap-1.5">
-                                        {interests.map((interest, idx) => (
+                                        {visibleInterests.map((interest, idx) => (
                                             <span key={idx} className="text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/20 px-2.5 py-1 rounded-lg">{interest}</span>
                                         ))}
                                     </div>
@@ -678,8 +1078,19 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                             )}
                             {strengths.length === 0 && interests.length === 0 && (
                                 <div className="flex flex-col items-center justify-center py-8 text-center opacity-50">
-                                    <Trophy size={36} className="mb-3 text-rose-400" />
+                                    <Trophy size={36} className="mb-3 text-emerald-400" />
                                     <p className="text-xs text-slate-400">پس از تکمیل دروس مشخص می‌شود.</p>
+                                </div>
+                            )}
+                            {(strengths.length > 4 || interests.length > 4) && (
+                                <div className="pt-2 border-t border-white/[0.03] flex justify-end">
+                                    <button 
+                                        onClick={() => setShowAllStrengths(prev => !prev)}
+                                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold transition-colors flex items-center gap-1 focus:outline-none"
+                                    >
+                                        <span>{showAllStrengths ? 'مشاهده کمتر' : 'مشاهده همه علایق و نقاط قوت...'}</span>
+                                        <span className="text-[8px]">{showAllStrengths ? '▲' : '▼'}</span>
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -731,8 +1142,17 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                 onDrop={e => handleDropOnCard(e, col, index)}
                 className={`relative group cursor-grab active:cursor-grabbing transition-transform duration-300 ${draggedItem?.id === id ? 'opacity-40 scale-[0.98]' : 'hover:scale-[1.01]'}`}
             >
-                <div className="absolute top-4 left-4 p-1.5 rounded-lg bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity z-20 text-white hover:bg-black/60 backdrop-blur-md shadow-lg" title="برای جابجایی بکشید">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>
+                <div className="absolute top-4 left-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                    <div className="p-1.5 rounded-lg bg-black/40 text-white hover:bg-black/60 backdrop-blur-md shadow-lg" title="برای جابجایی بکشید">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>
+                    </div>
+                    <button 
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleWidgetVisibility(id); }}
+                        className="p-1.5 rounded-lg bg-black/40 text-red-400 hover:text-red-300 hover:bg-black/60 backdrop-blur-md shadow-lg focus:outline-none"
+                        title="پنهان کردن ابزارک"
+                    >
+                        <X size={12} />
+                    </button>
                 </div>
                 {renderWidgetContent(id)}
             </div>
@@ -778,6 +1198,19 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                                         <div className="flex-1 text-right">
                                             <p className="text-[12px] font-bold text-slate-200 group-hover:text-primary transition-colors">بروزرسانی هسته دانش</p>
                                             <p className="text-[10px] text-slate-500 font-medium mt-0.5">تحلیل هوش مصنوعی بر اساس تمام دوره‌ها، گفتگوها و فعالیت‌ها</p>
+                                        </div>
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); setIsWidgetModalOpen(true); }}
+                                        className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-primary/10 border border-transparent hover:border-primary/20 text-right transition-all group"
+                                    >
+                                        <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                            <Settings size={14} className="text-primary animate-spin-slow" />
+                                        </div>
+                                        <div className="flex-1 text-right">
+                                            <p className="text-[12px] font-bold text-slate-200 group-hover:text-primary transition-colors">مدیریت ابزارک‌ها</p>
+                                            <p className="text-[10px] text-slate-500 font-medium mt-0.5">نمایش یا پنهان‌سازی کارت‌های تابلوی پیشرفت</p>
                                         </div>
                                     </button>
                                 </div>
@@ -912,6 +1345,46 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                                 <p className="text-[10px] text-slate-600 italic">جلسه‌ای در این روز تکمیل نشده</p>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+            {/* Widget management modal */}
+            {isWidgetModalOpen && (
+                <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[99999] p-4">
+                    <div className="bg-[#12121f] border border-white/10 rounded-[2.5rem] p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <Settings size={20} className="text-primary" /> مدیریت و شخصی‌سازی ابزارک‌ها
+                            </h3>
+                            <button 
+                                onClick={() => setIsWidgetModalOpen(false)} 
+                                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
+                            {ALL_WIDGETS.map(w => {
+                                const isVisible = layout.main.includes(w.id) || layout.side.includes(w.id);
+                                return (
+                                    <div key={w.id} className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition-colors" dir="rtl">
+                                        <span className="text-xs font-semibold text-slate-200">{w.label}</span>
+                                        <button 
+                                            onClick={() => toggleWidgetVisibility(w.id)}
+                                            className={`w-11 h-6 rounded-full transition-all relative focus:outline-none ${isVisible ? 'bg-primary' : 'bg-slate-700'}`}
+                                        >
+                                            <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${isVisible ? 'right-6' : 'right-1'}`} />
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <button 
+                            onClick={() => setIsWidgetModalOpen(false)}
+                            className="w-full mt-6 bg-primary hover:bg-primary-dark text-white font-bold py-3 rounded-2xl transition-all"
+                        >
+                            تایید و ذخیره چیدمان
+                        </button>
                     </div>
                 </div>
             )}

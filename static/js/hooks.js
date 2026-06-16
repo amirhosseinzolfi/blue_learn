@@ -40,7 +40,7 @@ function useStudyTimer(viewingItem, currentView, isCoachMode, onTimeSync) {
     const wasAutoPausedRef = useRef(false);
 
     // Is the timer allowed to run based on app state?
-    const isAppActive = viewingItem && currentView === 'courses' && !isCoachMode;
+    const isAppActive = viewingItem && currentView === 'courses';
 
     // Initial reset when item changes
     useEffect(() => {
@@ -77,10 +77,15 @@ function useStudyTimer(viewingItem, currentView, isCoachMode, onTimeSync) {
     const performSync = async (itemId, seconds) => {
         if (seconds <= 0 || !itemId) return;
         try {
+            const headers = { 'Content-Type': 'application/json' };
+            const token = localStorage.getItem('token');
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
             // Using native fetch with keepalive to ensure sync works even during page refresh/close
             const response = await fetch(`/items/${itemId}/study-time`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: headers,
                 body: JSON.stringify({ seconds }),
                 keepalive: true
             });
@@ -126,15 +131,17 @@ function useStudyTimer(viewingItem, currentView, isCoachMode, onTimeSync) {
     useEffect(() => {
         const handleUnload = () => {
             const unsynced = studyTimerRef.current - lastSyncedTimeRef.current;
-            if (unsynced > 0 && viewingItem?.id) {
-                // For unload, we use beacon or keepalive fetch
-                const url = `/items/${viewingItem.id}/study-time`;
+            const itemId = viewingItem?.id;
+            if (unsynced > 0 && itemId) {
+                // For unload, we use keepalive fetch with auth headers
+                const url = `/items/${itemId}/study-time`;
                 const body = JSON.stringify({ seconds: unsynced });
-                if (navigator.sendBeacon) {
-                    navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
-                } else {
-                    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true });
+                const headers = { 'Content-Type': 'application/json' };
+                const token = localStorage.getItem('token');
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
                 }
+                fetch(url, { method: 'POST', headers: headers, body, keepalive: true });
             }
         };
         window.addEventListener('beforeunload', handleUnload);
@@ -155,12 +162,22 @@ function useStudyTimer(viewingItem, currentView, isCoachMode, onTimeSync) {
         }
     }, [studyTimer]);
 
-    const syncNow = async (itemId) => {
+    const syncNow = (itemId) => {
+        const id = itemId || viewingItem?.id;
+        if (!id) return Promise.resolve();
         const unsynced = studyTimerRef.current - lastSyncedTimeRef.current;
         if (unsynced > 0) {
-            await performSync(itemId || viewingItem?.id, unsynced);
+            // Synchronously update local React state to prevent race conditions during navigation
+            const localNewTotal = studyTimerRef.current;
+            if (onTimeSync) {
+                onTimeSync(id, localNewTotal);
+            }
+            // Instantly update ref to prevent double syncs
             lastSyncedTimeRef.current = studyTimerRef.current;
+            // Trigger backend sync asynchronously
+            return performSync(id, unsynced);
         }
+        return Promise.resolve();
     };
 
     const setManualTime = (newTotalSeconds, itemId) => {

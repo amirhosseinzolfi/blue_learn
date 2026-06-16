@@ -1,6 +1,6 @@
 const { Settings, CheckCircle, User, Zap } = window.Icons;
 
-function SettingsView({ settings, setSettings, onSave, saved }) {
+function SettingsView({ settings, setSettings, onSave, saved, currentUser, onLogout }) {
     const [activeTab, setActiveTab] = React.useState('profile');
 
     const inputField = (key, label, type = 'text', placeholder = '', hint = '', dir = 'rtl') => (
@@ -49,6 +49,19 @@ function SettingsView({ settings, setSettings, onSave, saved }) {
                     >
                         <Zap size={16} className={activeTab === 'ai' ? "opacity-100" : "opacity-50"} /> هوش مصنوعی
                     </button>
+
+                    {onLogout && (
+                        <button
+                            type="button"
+                            onClick={onLogout}
+                            className="mt-auto hidden md:flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 text-[13px] font-medium text-rose-400/90 hover:bg-rose-500/10 hover:text-rose-400 border border-transparent hover:border-rose-500/20"
+                        >
+                            <svg className="w-[16px] h-[16px]" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1" />
+                            </svg>
+                            <span>خروج از حساب</span>
+                        </button>
+                    )}
                 </div>
 
                 {/* Content Area */}
@@ -57,9 +70,23 @@ function SettingsView({ settings, setSettings, onSave, saved }) {
                         <div className="flex-1 space-y-8 max-w-4xl">
                             {activeTab === 'profile' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                    <div className="mb-8">
-                                        <h3 className="text-xl font-bold text-white mb-2">اطلاعات شخصی</h3>
-                                        <p className="text-[13px] text-slate-400 leading-relaxed max-w-2xl">این اطلاعات به هوش مصنوعی کمک می‌کند تا با شناخت بهتر شما، دوره‌هایی کاملاً شخصی‌سازی شده و متناسب با نیازهایتان طراحی کند.</p>
+                                    <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/[0.04] pb-6">
+                                        <div>
+                                            <h3 className="text-xl font-bold text-white mb-1">حساب کاربری و اطلاعات شخصی</h3>
+                                            <p className="text-[13px] text-slate-400 leading-relaxed max-w-2xl">نام کاربری فعال شما در سیستم: <span className="text-primary font-extrabold pr-1 select-all">{currentUser}</span></p>
+                                        </div>
+                                        {onLogout && (
+                                            <button
+                                                type="button"
+                                                onClick={onLogout}
+                                                className="shrink-0 flex items-center justify-center gap-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 hover:border-rose-500/40 text-rose-400 px-5 py-2.5 rounded-2xl text-[13px] font-bold transition-all shadow-[0_4px_12px_rgba(244,63,94,0.1)] active:scale-[0.98]"
+                                            >
+                                                <svg className="w-[16px] h-[16px]" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1" />
+                                                </svg>
+                                                <span>خروج از حساب</span>
+                                            </button>
+                                        )}
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         {inputField('name', 'نام کامل', 'text', 'مثال: علی رضایی', '', 'rtl')}
@@ -77,11 +104,30 @@ function SettingsView({ settings, setSettings, onSave, saved }) {
                                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                     <div className="mb-8">
                                         <h3 className="text-xl font-bold text-white mb-2">تنظیمات موتور هوش مصنوعی</h3>
-                                        <p className="text-[13px] text-slate-400 leading-relaxed max-w-2xl">کلید دسترسی و مدل پردازشی مورد نظر برای تولید محتوای آموزشی را پیکربندی کنید.</p>
+                                        <p className="text-[13px] text-slate-400 leading-relaxed max-w-2xl">کلید دسترسی و مدل پردازشی مورد نظر برای تولید محتوا و تصاویر آموزشی را پیکربندی کنید.</p>
                                     </div>
                                     <div className="space-y-6 max-w-xl">
-                                        {inputField('google_api_key', 'کلید دسترسی (Google API Key)', 'password', 'AIzaSy...', '', 'ltr')}
-                                        {inputField('model_name', 'مدل پردازشی (Gemini Model)', 'text', 'gemini-flash-latest', '', 'ltr')}
+                                        {inputField('google_api_key', 'کلید دسترسی عمومی (Google API Key)', 'password', 'AIzaSy...', '', 'ltr')}
+                                        {inputField('model_name', 'مدل پردازشی متن (Gemini Text Model)', 'text', 'gemini-flash-latest', '', 'ltr')}
+                                        
+                                        <div className="h-px bg-white/[0.04] my-4" />
+                                        
+                                        {inputField('google_image_api_key', 'کلید دسترسی اختصاصی تصاویر (Google Image API Key - اختیاری)', 'password', 'اگر خالی بماند از کلید دسترسی عمومی استفاده می‌شود...', '', 'ltr')}
+                                        {inputField('image_model_name', 'مدل پردازشی تصویر (Gemini Image Model)', 'text', 'gemini-2.5-flash-image', '', 'ltr')}
+                                        
+                                        <div className="group flex items-start gap-4 mt-6">
+                                            <input
+                                                type="checkbox"
+                                                id="auto_generate_session_covers"
+                                                checked={settings.auto_generate_session_covers || false}
+                                                onChange={(e) => setSettings(s => ({ ...s, auto_generate_session_covers: e.target.checked }))}
+                                                className="w-5 h-5 mt-0.5 rounded border-purple-900/50 bg-dark-lightest text-primary focus:ring-primary focus:ring-offset-dark-lighter transition-all"
+                                            />
+                                            <div>
+                                                <label htmlFor="auto_generate_session_covers" className="block text-[13px] font-bold text-slate-300 mb-1 cursor-pointer select-none">تولید خودکار تصویر جلسات با هوش مصنوعی</label>
+                                                <p className="text-[11px] text-slate-500 leading-relaxed">با فعال‌سازی این گزینه، به هنگام تألیف درس‌ها توسط هوش مصنوعی، کاور اختصاصی ۱۶:۹ نیز در ابتدای مطالب تولید و درج می‌گردد.</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             )}

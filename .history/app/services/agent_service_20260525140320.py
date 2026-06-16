@@ -1,25 +1,29 @@
 import os
 import time
-import json
 import math
-from typing import List, Optional
+from typing import List, Optional, Generator
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama import OllamaEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from pydantic import BaseModel, Field
 
-import prompts
-from logger import logger
+from app import prompts
+from app.logger import logger
+from app.schemas import (
+    OutlineItemSchema,
+    OutlineChapterSchema,
+    CourseOutlineSchema,
+    CourseGenerationSchema,
+    ChatAgentResponse,
+    ProfilerUpdateSchema
+)
 
 # ==========================================
-# 1. SETUP & CONFIGURATION
+# 1. LLM ENGINE INSTANTIATIONS
 # ==========================================
-load_dotenv()
 
-# --- Dedicated LLM for Course Generator Agent (creative curriculum design) ---
-def get_generator_llm():
+def get_generator_llm() -> ChatGoogleGenerativeAI:
+    """Instantiates a dedicated LLM for course curriculum outlining (creative)."""
     load_dotenv(override=True)
     return ChatGoogleGenerativeAI(
         model=os.getenv("GENERATOR_MODEL_NAME", "gemini-flash-latest"),
@@ -27,11 +31,8 @@ def get_generator_llm():
         temperature=0.75,
     )
 
-def get_embeddings_model():
-    return OllamaEmbeddings(model="nomic-embed-text-v2-moe:latest")
-
-# --- Dedicated LLM for Content Generation (lesson writing) ---
-def get_content_llm():
+def get_content_llm() -> ChatGoogleGenerativeAI:
+    """Instantiates a dedicated LLM for session/lesson content writing."""
     load_dotenv(override=True)
     return ChatGoogleGenerativeAI(
         model=os.getenv("MAIN_MODEL_NAME", "gemini-flash-latest"),
@@ -39,8 +40,8 @@ def get_content_llm():
         temperature=0.7,
     )
 
-# --- Dedicated LLM for AI Coach (streaming, lower temperature for consistency) ---
-def get_coach_llm():
+def get_coach_llm() -> ChatGoogleGenerativeAI:
+    """Instantiates a dedicated, low-temperature LLM for the conversational coach."""
     load_dotenv(override=True)
     return ChatGoogleGenerativeAI(
         model=os.getenv("COACH_MODEL_NAME", "gemini-flash-lite-latest"),
@@ -48,99 +49,37 @@ def get_coach_llm():
         temperature=0.5,
     )
 
-# ==========================================
-# 2. PYDANTIC SCHEMAS (STRUCTURED OUTPUT)
-# ==========================================
-# These schemas enforce the JSON structure that the LLM must return.
-# They act as the strict interface between the AI's natural language and the app's backend.
-
-class OutlineItemSchema(BaseModel):
-    title: str = Field(description="Title of the micro-course session")
-    description: str = Field(description="Brief description of what will be covered in this session")
-
-class OutlineChapterSchema(BaseModel):
-    title: str = Field(description="Title of the main chapter")
-    description: str = Field(description="Brief description of the chapter")
-    items: List[OutlineItemSchema] = Field(description="Sessions within this chapter")
-
-class CourseOutlineSchema(BaseModel):
-    items: List[OutlineChapterSchema]
-
-class CourseGenerationSchema(BaseModel):
-    short_title: str = Field(description="Most efficient proper  short title for the course in 3 upto 6 word")
-    level: str = Field(description="Level of the course in Persian, e.g., مبتدی, متوسط, پیشرفته")
-    hours: int = Field(description="Estimated hours to complete")
-    sessions: int = Field(description="Number of sessions")
-    description: str = Field(description="Course proper detail explanation overview in one paragraph")
-    outline: List[OutlineChapterSchema] = Field(description="Detailed list of chapters and their micro-courses")
-
-class ChatAgentResponse(BaseModel):
-    is_complete: bool = Field(description="Set to true if you have gathered enough information to generate the course. False if you still need to ask the user questions.")
-    chat_response: Optional[str] = Field(description="If is_complete is false, this is the question you ask the user. If is_complete is true, this can be empty.")
-    course_data: Optional[CourseGenerationSchema] = Field(description="If is_complete is true, this contains the full generated course data.")
-
-class KnowledgeNodeUpdateSchema(BaseModel):
-    concept: str = Field(description="Name of the concept, e.g., SQL Joins")
-    category: str = Field(description="Category of the concept")
-    mastery_score_delta: float = Field(description="Change in mastery score from 0.0 to 1.0")
-    confidence_score: float = Field(description="Confidence of AI in this evaluation from 0.0 to 1.0")
-
-class ProfilerUpdateSchema(BaseModel):
-    global_learning_velocity: float = Field(description="Speed coefficient from 0.5 to 2.0")
-    attention_span_minutes: int = Field(description="Adjusted average session time")
-    retention_index: float = Field(description="Memory decay indicator from 0.0 to 1.0")
-    ls_hands_on: float = Field(default=0.0, description="Learning style ratio for hands_on")
-    ls_visual: float = Field(default=0.0, description="Learning style ratio for visual")
-    ls_theoretical: float = Field(default=0.0, description="Learning style ratio for theoretical")
-    ls_self_directed: float = Field(default=0.0, description="Learning style ratio for self_directed")
-    pt_persistence: str = Field(default="", description="Personality trait persistence")
-    pt_patience: str = Field(default="", description="Personality trait patience_with_errors")
-    pt_curiosity: str = Field(default="", description="Personality trait learning_curiosity")
-    pt_session_length: str = Field(default="", description="Personality trait preferred_session_length")
-    learning_style_summary: str = Field(default="", description="Persian narrative of how the user learns best")
-    personality_summary: str = Field(default="", description="Persian narrative of the user's learner personality")
-    strength_areas: List[str] = Field(default=[], description="Persian list of top subject domains")
-    new_interests: List[str] = Field(default=[], description="Persian list of newly discovered interests")
-    recommended_topics: List[str] = Field(default=[], description="Persian list of recommended next topics")
-    updated_knowledge_nodes: List[KnowledgeNodeUpdateSchema] = Field(description="Updates to the knowledge graph")
 
 # ==========================================
-# 3. CORE GENERATION FUNCTIONS
+# 2. CORE ONE-SHOT GENERATIONS
 # ==========================================
-# These functions handle direct, one-shot generations (like writing an outline or a lesson).
-# We use direct LangChain invocation here instead of LangGraph since these are single-step tasks.
 
-def get_outline(subject: str) -> List[OutlineItemSchema]:
+def get_outline(subject: str) -> List[OutlineChapterSchema]:
     """
-    Generates a detailed outline of micro-courses for a given subject.
-    Uses structured output to guarantee a list of titles and descriptions.
+    Generates a detailed chapter-by-chapter outline for a given subject.
+    Utilizes Pydantic structured output parsing.
     """
     logger.log_process_start("Outline Generation", f"Generating outline for subject: {subject}")
     start_time = time.time()
     
-    # Use ChatPromptTemplate for standard LangChain pattern
-    # NOTE: Google GenAI requires at least one human/user message in `contents`.
-    # We add a minimal human turn after the system prompt to satisfy this requirement.
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", prompts.OUTLINE_GENERATOR_PROMPT),
         ("human", "Please generate the course outline now."),
     ])
     
-    # Bind the schema and create the chain
+    # Standard LangChain chain composition using the pipe operator
     chain = prompt_template | get_content_llm().with_structured_output(CourseOutlineSchema)
     result = chain.invoke({"subject": subject})
     
-    # Log the full structured result as a string for visibility
     logger.log_info(f"Generated {len(result.items)} chapters for the outline.")
-    
     logger.log_process_end("Outline Generation", time.time() - start_time)
     
     return result.items
 
 def get_content(subject: str, item_title: str, course_description: str = "", full_outline: List[str] = None, user_info: str = "") -> str:
     """
-    Generates the actual Markdown content for a specific lesson/session.
-    Provides the LLM with the broader course context to maintain consistency.
+    Writes comprehensive, rich Markdown text for an individual syllabus session.
+    Provides detailed context to ensure consistency.
     """
     outline_context = "\n".join([f"- {t}" for t in (full_outline or [])]) if full_outline else "Not provided"
     
@@ -160,9 +99,6 @@ Course Outline:
 {outline_context}
 """
 
-    # Use ChatPromptTemplate for standard LangChain pattern
-    # NOTE: Google GenAI requires at least one human/user message in `contents`.
-    # We add a minimal human turn after the system prompt to satisfy this requirement.
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", prompts.CONTENT_GENERATOR_PROMPT),
         ("human", user_prompt_template),
@@ -179,10 +115,9 @@ Course Outline:
     }
     
     result = chain.invoke(invoke_args)
-    
     content = result.content
     
-    # Handle edge case where content might be returned as a list of dicts/strings
+    # Handle list part format edge cases returned by the model
     if isinstance(content, list):
         content = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in content])
         
@@ -195,16 +130,15 @@ Course Outline:
     )
     
     logger.log_process_end("Content Generation", time.time() - start_time)
-        
     return content
 
+
 # ==========================================
-# 4. CHAT & CONVERSATIONAL AGENTS
+# 3. CHAT & AGENT FLOWS
 # ==========================================
-# These functions handle multi-turn conversations with the user.
 
 def generate_history_summary(messages: List[dict], current_summary: str = None) -> str:
-    """Uses LLM to summarize a batch of messages, appending to the current summary."""
+    """Progressively condenses conversation logs into short summary blocks to conserve tokens."""
     if not messages:
         return current_summary or ""
         
@@ -240,17 +174,15 @@ def generate_history_summary(messages: List[dict], current_summary: str = None) 
 
 def chat_course_generator(messages: List[dict], user_info: str = "") -> ChatAgentResponse:
     """
-    Acts as a consultant to gather requirements from the user before building a course.
-    Returns structured data that dictates whether to keep chatting or proceed to generation.
+    Guides the user through dynamic, diagnostic chat steps to refine curriculum needs.
+    Uses structured outputs parsing.
     """
-    # Use ChatPromptTemplate for standard LangChain message handling
     system_prompt = prompts.COURSE_GENERATOR_SYSTEM_PROMPT.format(user_info=user_info)
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         MessagesPlaceholder(variable_name="history"),
     ])
     
-    # Convert dict messages to LangChain message objects
     langchain_history = []
     full_conversation_log = ""
     for msg in messages:
@@ -267,7 +199,6 @@ def chat_course_generator(messages: List[dict], user_info: str = "") -> ChatAgen
     logger.log_process_start("Chat Course Generator", "Handling incoming chat messages")
     start_time = time.time()
     
-    # Create the chain using the pipe operator
     chain = prompt_template | get_generator_llm().with_structured_output(ChatAgentResponse)
     result = chain.invoke({"history": langchain_history})
     
@@ -280,12 +211,24 @@ def chat_course_generator(messages: List[dict], user_info: str = "") -> ChatAgen
     )
     
     logger.log_process_end("Chat Course Generator", time.time() - start_time)
-    
     return result
 
-def chat_coach_stream(messages: List[dict], course_title: str, course_description: str, outline_titles: List[str], current_session_title: str, current_session_content: str, chat_summary: Optional[str] = None, user_info: str = "", semantic_memory_context: str = ""):
+def chat_coach_stream(
+    messages: List[dict],
+    course_title: str,
+    course_description: str,
+    outline_titles: List[str],
+    current_session_title: str,
+    current_session_content: str,
+    chat_summary: Optional[str] = None,
+    user_info: str = "",
+    semantic_memory_context: str = ""
+) -> Generator[str, None, None]:
+    """
+    Initiates a streaming chat coach conversation.
+    Limits memory to the last 10 turns for efficient token caching.
+    """
     logger.log_process_start("Smart Coach Agent", "Generating streaming response")
-    
     outline_context = "\n".join([f"- {title}" for title in outline_titles])
     
     system_prompt = prompts.SMART_COACH_SYSTEM_PROMPT.format(
@@ -298,13 +241,12 @@ def chat_coach_stream(messages: List[dict], course_title: str, course_descriptio
         user_info=user_info,
         semantic_memory_context=semantic_memory_context
     )
-    # Use ChatPromptTemplate for standard LangChain message handling
+    
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         MessagesPlaceholder(variable_name="history"),
     ])
     
-    # Convert dict messages to LangChain message objects
     langchain_history = []
     full_conversation_log = ""
     for msg in messages:
@@ -318,35 +260,30 @@ def chat_coach_stream(messages: List[dict], course_title: str, course_descriptio
         elif role == "assistant":
             langchain_history.append(AIMessage(content=content))
             
-    # Apply efficient conversation history method (Short Memory optimization)
-    # We keep the last 10 messages to keep context window small and efficient
+    # Apply standard sliding-window memory slicing (last 10 turns)
     if len(langchain_history) > 10:
         langchain_history = langchain_history[-10:]
         
-    # Ensure the first message in history is a user message for Gemini compatibility
+    # Ensure starting with a UserMessage for Gemini requirements
     if langchain_history and langchain_history[0].type == "ai":
         langchain_history = langchain_history[1:]
             
     logger.log_process_start("AI Coach Stream", "Handling coach chat interaction")
     start_time = time.time()
     
-    # Stream the chunks directly to the caller (FastAPI StreamingResponse)
     full_response_content = ""
     logger.log_ai_stream_start("AI Smart Coach", get_coach_llm().model)
     
     try:
-        # Invoke the chain in streaming mode
         chain = prompt_template | get_coach_llm()
         for chunk in chain.stream({"history": langchain_history}):
             content = chunk.content
             if isinstance(content, list):
-                # Handle cases where content is a list of parts
                 content = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in content])
             
             full_response_content += content
             yield content
             
-        # Log the full exchange after streaming completes
         logger.log_ai_call(
             step_name="AI Smart Coach (Stream Finished)",
             model_name=get_coach_llm().model,
@@ -365,9 +302,7 @@ def chat_coach_stream(messages: List[dict], course_title: str, course_descriptio
     logger.log_process_end("AI Coach Stream", time.time() - start_time)
 
 def generate_knowledge_insight(completed_sessions: List[dict]) -> str:
-    """
-    Analyzes completed sessions and generates a motivational knowledge insight.
-    """
+    """Analyzes historical progress and prints highly engaging educational reflection insights (Farsi)."""
     if not completed_sessions:
         return "You haven't completed any sessions yet. Start your learning journey to see your insights here! 🚀"
 
@@ -392,9 +327,7 @@ def generate_knowledge_insight(completed_sessions: List[dict]) -> str:
     return content
 
 def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: str) -> Optional[ProfilerUpdateSchema]:
-    """
-    Analyzes recent learning events and returns a structured JSON update for the Cognitive Profile.
-    """
+    """Analyzes learner traits and conceptual mastery, updating the user graph (Farsi summaries)."""
     logger.log_process_start("Cognitive Profiler Agent", "Analyzing event logs for double-loop learning")
     start_time = time.time()
 
@@ -404,7 +337,6 @@ def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: s
     ])
 
     try:
-        # We use the main generative model for complex analysis
         llm = get_generator_llm()
         structured_llm = llm.with_structured_output(ProfilerUpdateSchema)
         chain = prompt_template | structured_llm
@@ -433,45 +365,97 @@ def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: s
         logger.log_process_end("Cognitive Profiler Agent", time.time() - start_time)
         return None
 
-def calculate_cosine_similarity(v1: List[float], v2: List[float]) -> float:
-    """Mathematical standard vector similarity calculation."""
-    dot_product = sum(a * b for a, b in zip(v1, v2))
-    mag1 = math.sqrt(sum(a * a for a in v1))
-    mag2 = math.sqrt(sum(b * b for b in v2))
-    if mag1 == 0 or mag2 == 0: return 0.0
-    return dot_product / (mag1 * mag2)
+# ==========================================
+# 4. IMAGE GENERATION SERVICES
+# ==========================================
 
-def semantic_search_logs(query: str, logs_with_vectors: List[dict], top_k: int = 3) -> str:
+def generate_prompt_for_image(note_title: str, content_context: str) -> str:
     """
-    Standard lightweight LangChain semantic search.
-    Embeds the user's query and compares it to all past embedded logs.
+    Uses the content LLM and the IMAGE_SYSTEM_INSTRUCTION to translate course/session content
+    into a concrete visual prompt description for the Imagen model.
     """
-    logger.log_process_start("Semantic Vector Search", f"Searching past memories for: '{query}'")
+    logger.log_process_start("Image Prompt Translation", f"Creating visual prompt for: {note_title}")
+    
+    # Replace note_title dynamically in the system instruction template
+    system_prompt = prompts.IMAGE_SYSTEM_INSTRUCTION.replace("{note_title}", note_title).replace("note_title", note_title)
+    
+    user_prompt = f"""Based on the following content context, please write a single English prompt description for generating a cover image.
+Title: {note_title}
+Content Context:
+{content_context}
+
+Output ONLY the final image generation prompt in English, with no quotes or introduction, and ensure you include the requested technical details at the end.
+"""
+
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", user_prompt),
+    ])
+    
+    chain = prompt_template | get_generator_llm()
+    result = chain.invoke({})
+    prompt = result.content
+    if isinstance(prompt, list):
+        prompt = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in prompt])
+    
+    prompt = prompt.strip()
+    logger.log_info(f"Generated visual prompt: {prompt}")
+    logger.log_process_end("Image Prompt Translation", 0)
+    return prompt
+
+def generate_image_cover(prompt_text: str) -> Optional[bytes]:
+    """
+    Generates a 16:9 cover image using Google's Imagen 4 model.
+    Returns the raw bytes of the generated image if successful, otherwise None.
+    """
+    import requests
+    import base64
+    
+    load_dotenv(override=True)
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        logger.log_error("Image Generation: GOOGLE_API_KEY is not set.")
+        return None
+
+    # Call the Imagen 4 predict endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "instances": [
+            {
+                "prompt": prompt_text
+            }
+        ],
+        "parameters": {
+            "sampleCount": 1,
+            "aspectRatio": "16:9",
+            "outputMimeType": "image/jpeg"
+        }
+    }
+
+    logger.log_process_start("AI Image Generation", f"Generating image with prompt: {prompt_text[:100]}...")
     start_time = time.time()
     
     try:
-        embedder = get_embeddings_model()
-        query_vector = embedder.embed_query(query)
+        response = requests.post(url, headers=headers, json=payload)
         
-        scored_logs = []
-        for log in logs_with_vectors:
-            if not log.get('vector'): continue
-            similarity = calculate_cosine_similarity(query_vector, log['vector'])
-            scored_logs.append((similarity, log))
-            
-        # Sort by highest similarity (most relevant)
-        scored_logs.sort(key=lambda x: x[0], reverse=True)
-        top_logs = scored_logs[:top_k]
-        
-        context_str = ""
-        logger.log_info("--- Top Semantic Memory Results ---")
-        for idx, (score, log) in enumerate(top_logs):
-            logger.log_info(f"Memory {idx+1} [Score: {score:.3f}]: {log['title']}")
-            if score > 0.65: # Threshold to ensure relevance
-                context_str += f"- Past Session '{log['title']}': {log['text']}\n"
+        if response.status_code == 200:
+            res_json = response.json()
+            if "predictions" in res_json and len(res_json["predictions"]) > 0:
+                pred = res_json["predictions"][0]
+                if "bytesBase64Encoded" in pred:
+                    img_bytes = base64.b64decode(pred["bytesBase64Encoded"])
+                    logger.log_success(f"Successfully generated image cover ({len(img_bytes)} bytes)")
+                    logger.log_process_end("AI Image Generation", time.time() - start_time)
+                    return img_bytes
                 
-        logger.log_process_end("Semantic Vector Search", time.time() - start_time)
-        return context_str if context_str else "No highly relevant past memories found."
+            logger.log_error(f"Image Generation response format invalid: {response.text[:500]}")
+        else:
+            logger.log_error(f"Image Generation failed (HTTP {response.status_code}): {response.text[:1000]}")
+            
     except Exception as e:
-        logger.log_error(f"Semantic Search Failed: {str(e)}")
-        return "Memory retrieval unavailable."
+        logger.log_error(f"Error in Image Generation: {str(e)}")
+        
+    logger.log_process_end("AI Image Generation", time.time() - start_time)
+    return None
+

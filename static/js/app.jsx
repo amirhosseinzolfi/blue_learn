@@ -2,6 +2,8 @@ const { useState, useEffect, useRef } = React;
 
 function App() {
     // ── State ──────────────────────────────────────────────────────────────
+    const [token, setToken] = useState(() => localStorage.getItem('token') || null);
+    const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('username') || null);
     const [courses, setCourses] = useState([]);
     const [selectedCourse, setSelectedCourse] = useState(null);
     const [viewingItem, setViewingItem] = useState(null);
@@ -39,6 +41,55 @@ function App() {
     const [visibleSeries, setVisibleSeries] = useState({ study: true, average: false });
     const [chartPopup, setChartPopup] = useState({ visible: false, data: null, x: 0, y: 0 });
     const [popupHovered, setPopupHovered] = useState(false);
+    const [autoGenerateSessionCovers, setAutoGenerateSessionCovers] = useState(() => {
+        const val = localStorage.getItem('auto_generate_session_covers');
+        return val === null ? false : val === 'true';
+    });
+    const [chatLevel, setChatLevel] = useState('default');
+    const [chatDurationSessions, setChatDurationSessions] = useState(0);
+    const [chatLearningStyle, setChatLearningStyle] = useState('default');
+    const [chatAttachedFiles, setChatAttachedFiles] = useState([]);
+
+    // ── Auth Handlers ──────────────────────────────────────────────────────
+    const handleLogout = () => {
+        syncNow();
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        localStorage.removeItem('userId');
+        setToken(null);
+        setCurrentUser(null);
+        setCourses([]);
+        setSelectedCourse(null);
+        setViewingItem(null);
+        setDailyMicroCourses([]);
+        setStats({ total_courses: 0, completed_courses: 0, total_sessions: 0, total_completed_sessions: 0, total_study_time: 0, recent_completed: [], activity_data: [] });
+        setInsights([]);
+        setCurrentView('courses');
+    };
+
+    const loadInitialData = () => {
+        fetchCourses(); fetchStats(); fetchInsights();
+        api.fetchSettings().then(d => {
+            setSettings({
+                google_api_key: d.google_api_key || '',
+                model_name: d.model_name || 'gemini-flash-latest',
+                google_image_api_key: d.google_image_api_key || '',
+                image_model_name: d.image_model_name || 'gemini-2.5-flash-image',
+                auto_generate_session_covers: d.auto_generate_session_covers !== undefined ? d.auto_generate_session_covers : false,
+                name: d.name || '',
+                age: d.age || '',
+                education: d.education || '',
+                background_experience: d.background_experience || '',
+                additional_info: d.additional_info || ''
+            });
+            const autoGen = d.auto_generate_session_covers !== undefined ? d.auto_generate_session_covers : false;
+            setAutoGenerateSessionCovers(autoGen);
+            localStorage.setItem('auto_generate_session_covers', autoGen ? 'true' : 'false');
+        }).catch(console.error);
+        const todayKey = new Date().toISOString().split('T')[0];
+        const stored = localStorage.getItem(`daily_courses_${todayKey}`);
+        stored ? setDailyMicroCourses(JSON.parse(stored)) : fetchDailyMicro(false, microSettings);
+    };
 
     // ── Refs ───────────────────────────────────────────────────────────────
     const menuRef = useRef(null);
@@ -69,6 +120,24 @@ function App() {
 
     const { studyTimer, syncNow, isPaused, setIsPaused, setManualTime } = useStudyTimer(viewingItem, currentView, isCoachMode, handleStudyTimeSync);
 
+    // Wrapped state setters that automatically sync study time before transitions
+    const changeViewingItem = (item) => {
+        syncNow();
+        setViewingItem(item);
+    };
+
+    const changeSelectedCourse = (course) => {
+        syncNow();
+        setSelectedCourse(course);
+    };
+
+    const handleSidebarNavigate = async (view) => {
+        await syncNow();
+        setCurrentView(view);
+        setSelectedCourse(null);
+        setViewingItem(null);
+    };
+
     // ── Helpers ────────────────────────────────────────────────────────────
     const showToast = (message, type = 'success') => { setToast({ message, type }); setTimeout(() => setToast(null), 4000); };
     const scrollCoachBottom = () => setTimeout(() => { if (coachScrollRef.current) coachScrollRef.current.scrollTop = coachScrollRef.current.scrollHeight; }, 50);
@@ -86,6 +155,7 @@ function App() {
     };
 
     const selectCourse = async (courseId, keepItem = false) => {
+        await syncNow();
         setLoading(true);
         try {
             const course = await api.fetchCourse(courseId);
@@ -117,12 +187,6 @@ function App() {
 
     // ── Effects ────────────────────────────────────────────────────────────
     useEffect(() => {
-        fetchCourses(); fetchStats(); fetchInsights();
-        api.fetchSettings().then(d => setSettings({ google_api_key: d.google_api_key || '', model_name: d.model_name || 'gemini-flash-latest', name: d.name || '', age: d.age || '', education: d.education || '', background_experience: d.background_experience || '', additional_info: d.additional_info || '' })).catch(console.error);
-        const todayKey = new Date().toISOString().split('T')[0];
-        const stored = localStorage.getItem(`daily_courses_${todayKey}`);
-        stored ? setDailyMicroCourses(JSON.parse(stored)) : fetchDailyMicro(false, microSettings);
-
         const onClickOutside = (e) => {
             if (menuRef.current && !menuRef.current.contains(e.target)) setActiveMenu(null);
             if (sessionMenuRef.current && !sessionMenuRef.current.contains(e.target)) setIsSessionMenuOpen(false);
@@ -130,8 +194,28 @@ function App() {
             if (popup && !popup.contains(e.target)) setChartPopup(p => ({ ...p, visible: false }));
         };
         document.addEventListener('mousedown', onClickOutside);
-        return () => document.removeEventListener('mousedown', onClickOutside);
+
+        const interceptor = axios.interceptors.response.use(
+            response => response,
+            error => {
+                if (error.response && error.response.status === 401) {
+                    handleLogout();
+                }
+                return Promise.reject(error);
+            }
+        );
+
+        return () => {
+            document.removeEventListener('mousedown', onClickOutside);
+            axios.interceptors.response.eject(interceptor);
+        };
     }, []);
+
+    useEffect(() => {
+        if (token) {
+            loadInitialData();
+        }
+    }, [token]);
 
     useEffect(() => {
         if (viewingItem && contentRef.current) window.scrollTo({ top: contentRef.current.offsetTop - 20, behavior: 'smooth' });
@@ -172,7 +256,7 @@ function App() {
         if (target) setViewingItem({ ...target, content: null });
         setLoadingItemId(itemId); setLoading(true);
         try {
-            const res = await api.generateItem(itemId);
+            const res = await api.generateItem(itemId, autoGenerateSessionCovers);
             setViewingItem(res); setLoadingItemId(null);
             const course = await api.fetchCourse(selectedCourse.id);
             setSelectedCourse(course);
@@ -204,6 +288,7 @@ function App() {
     };
 
     const handleMicroCardClick = async (item) => {
+        await syncNow();
         setCurrentView('courses'); setLoading(true);
         try {
             const course = await api.fetchCourse(item.course_id);
@@ -212,7 +297,7 @@ function App() {
             if (!target) return;
             if (target.content) { setViewingItem(target); return; }
             setViewingItem({ ...target, content: null }); setLoadingItemId(target.id);
-            const gen = await api.generateItem(target.id);
+            const gen = await api.generateItem(target.id, autoGenerateSessionCovers);
             setViewingItem(gen);
             const updated = await api.fetchCourse(item.course_id);
             setSelectedCourse(updated);
@@ -247,23 +332,53 @@ function App() {
     };
 
     const sendChatMessage = async () => {
-        if (!chatInput.trim() || isChatLoading) return;
-        const msgs = [...chatMessages, { role: 'user', content: chatInput }];
-        setChatMessages(msgs); setChatInput(''); setIsChatLoading(true); setPendingCourseData(null);
+        if ((!chatInput.trim() && chatAttachedFiles.length === 0) || isChatLoading) return;
+        
+        const images = chatAttachedFiles.filter(f => f.type === 'image').map(f => f.data);
+        const audio = chatAttachedFiles.filter(f => f.type === 'audio').map(f => f.data);
+        
+        const msgs = [...chatMessages, { role: 'user', content: chatInput, images, audio }];
+        setChatMessages(msgs); 
+        setChatInput(''); 
+        setChatAttachedFiles([]);
+        setIsChatLoading(true); 
+        setPendingCourseData(null);
+        
         try {
-            const res = await api.chatCourseGen(msgs);
+            const res = await api.chatCourseGen(
+                msgs,
+                chatLevel,
+                chatDurationSessions > 0 ? chatDurationSessions : null,
+                chatLearningStyle
+            );
             setChatMessages(p => [...p, { role: 'assistant', content: res.chat_response }]);
             if (res.is_complete && res.course_data) setPendingCourseData(res.course_data);
-        } catch { setChatMessages(p => [...p, { role: 'assistant', content: 'خطایی رخ داد. لطفا دوباره تلاش کنید.' }]); }
-        finally { setIsChatLoading(false); }
+        } catch { 
+            setChatMessages(p => [...p, { role: 'assistant', content: 'خطایی رخ داد. لطفا دوباره تلاش کنید.' }]); 
+        } finally { 
+            setIsChatLoading(false); 
+        }
     };
 
-    const acceptCourse = async () => {
+    const acceptCourse = async (generateCover = false) => {
         if (!pendingCourseData) return;
         setChatMessages(p => [...p, { role: 'assistant', content: 'در حال ایجاد دوره...' }]);
         setLoading(true);
         try {
-            const res = await api.post('/courses/', pendingCourseData);
+            const courseData = { 
+                title: pendingCourseData.title,
+                short_title: pendingCourseData.short_title,
+                level: pendingCourseData.level,
+                total_estimated_hours: pendingCourseData.total_estimated_hours,
+                target_user_summary: pendingCourseData.target_user_summary,
+                course_goal: pendingCourseData.course_goal,
+                course_description: pendingCourseData.course_description,
+                learning_outcomes: pendingCourseData.learning_outcomes,
+                prerequisites: pendingCourseData.prerequisites,
+                chapters: pendingCourseData.chapters,
+                generate_cover: generateCover 
+            };
+            const res = await api.post('/courses/', courseData);
             setIsChatModalOpen(false); setPendingCourseData(null);
             if (res?.id) await selectCourse(res.id);
         } catch (e) { console.error(e); } finally { setLoading(false); }
@@ -273,14 +388,18 @@ function App() {
         if (!coachInput.trim() || isCoachLoading || !selectedCourse || !viewingItem) return;
         const msg = coachInput;
         setCoachMessages(p => [...p, { role: 'user', content: msg }]);
-        setCoachInput(''); setIsCoachLoading(true); scrollCoachBottom();
+        setCoachInput(''); setIsCoachLoading(true);
         try {
             let first = true;
             await api.coachStream(selectedCourse.id, viewingItem.id, msg, (full) => {
                 setIsCoachLoading(false);
-                if (first) { setCoachMessages(p => [...p, { role: 'assistant', content: full }]); first = false; }
-                else setCoachMessages(p => { const n = [...p]; n[n.length - 1].content = full; return n; });
-                scrollCoachBottom();
+                if (first) { 
+                    setCoachMessages(p => [...p, { role: 'assistant', content: full }]); 
+                    first = false; 
+                }
+                else {
+                    setCoachMessages(p => { const n = [...p]; n[n.length - 1].content = full; return n; });
+                }
             });
         } catch { setCoachMessages(p => [...p, { role: 'assistant', content: 'خطایی رخ داد. لطفا دوباره تلاش کنید.' }]); }
         finally { setIsCoachLoading(false); }
@@ -288,8 +407,13 @@ function App() {
 
     const openChatModal = () => {
         setIsChatModalOpen(true);
-        setChatMessages([{ role: 'assistant', content: 'سلام! من بلو هستم، دستیار هوشمند شما برای طراحی دوره\u200cهای آموزشی شخصی\u200cسازی شده. چه موضوعی را دوست دارید یاد بگیرید؟' }]);
-        setChatInput(''); setPendingCourseData(null);
+        setChatMessages([{ role: 'assistant', content: 'سلام! من بلو هستم، دستیار هوشمند شما برای طراحی دوره‌های آموزشی شخصی‌سازی شده. چه موضوعی را دوست دارید یاد بگیرید؟' }]);
+        setChatInput(''); 
+        setPendingCourseData(null);
+        setChatLevel('default');
+        setChatDurationSessions(0);
+        setChatLearningStyle('default');
+        setChatAttachedFiles([]);
     };
 
     const copyContent = () => {
@@ -304,6 +428,10 @@ function App() {
     const dailyReadingMinutes = todayActivity ? todayActivity.minutes : 0;
 
     // ── Render ─────────────────────────────────────────────────────────────
+    if (!token) {
+        return <AuthView onAuthSuccess={(t, u) => { setToken(t); setCurrentUser(u); }} />;
+    }
+
     return (
         <div className="min-h-screen bg-dark text-slate-200 relative overflow-clip flex flex-col md:flex-row">
             {/* Toast */}
@@ -324,15 +452,17 @@ function App() {
                 <div className="absolute bottom-[-10%] left-[-10%] w-[30rem] h-[30rem] bg-indigo-500/10 blur-[120px] rounded-full" />
             </div>
 
-            <Sidebar currentView={currentView} setCurrentView={setCurrentView} setSelectedCourse={setSelectedCourse} openChatModal={openChatModal} />
+            <Sidebar currentView={currentView} onNavigate={handleSidebarNavigate} openChatModal={openChatModal} onLogout={handleLogout} />
 
             <main ref={mainScrollRef} className="flex-1 h-screen overflow-y-auto p-4 md:p-8 relative">
                 <div className="max-w-6xl mx-auto pb-12">
                     {currentView === 'courses' && (
                         <CoursesView
-                            courses={courses} selectedCourse={selectedCourse} viewingItem={viewingItem} setViewingItem={setViewingItem}
-                            onSelectCourse={selectCourse} onBack={() => setSelectedCourse(null)} onEditCourse={openEditCourse}
+                            courses={courses} selectedCourse={selectedCourse} viewingItem={viewingItem} setViewingItem={changeViewingItem}
+                            onOpenChatModal={openChatModal}
+                            onSelectCourse={selectCourse} onBack={() => changeSelectedCourse(null)} onEditCourse={openEditCourse}
                             onDeleteCourse={deleteCourse} onGenerateItem={generateItem} onCompleteItem={completeItem}
+                            autoGenerateSessionCovers={autoGenerateSessionCovers} setAutoGenerateSessionCovers={setAutoGenerateSessionCovers}
                             onCopyContent={copyContent} onSendCoach={sendCoachMessage}
                             activeMenu={activeMenu} setActiveMenu={setActiveMenu} menuRef={menuRef}
                             sessionMenuRef={sessionMenuRef} isSessionMenuOpen={isSessionMenuOpen} setIsSessionMenuOpen={setIsSessionMenuOpen}
@@ -371,7 +501,21 @@ function App() {
                     )}
                     {currentView === 'settings' && (
                         <SettingsView settings={settings} setSettings={setSettings} saved={settingsSaved}
-                            onSave={async (e) => { e.preventDefault(); try { await api.saveSettings(settings); setSettingsSaved(true); setTimeout(() => setSettingsSaved(false), 3000); } catch (err) { console.error(err); } }}
+                            onSave={async (e) => {
+                                e.preventDefault();
+                                try {
+                                    await api.saveSettings(settings);
+                                    setSettingsSaved(true);
+                                    if (settings.auto_generate_session_covers !== undefined) {
+                                        setAutoGenerateSessionCovers(settings.auto_generate_session_covers);
+                                        localStorage.setItem('auto_generate_session_covers', settings.auto_generate_session_covers ? 'true' : 'false');
+                                    }
+                                    setTimeout(() => setSettingsSaved(false), 3000);
+                                } catch (err) {
+                                    console.error(err);
+                                }
+                            }}
+                            currentUser={currentUser} onLogout={handleLogout}
                         />
                     )}
                 </div>
@@ -381,7 +525,12 @@ function App() {
             {isChatModalOpen && (
                 <ChatModal messages={chatMessages} input={chatInput} setInput={setChatInput} isLoading={isChatLoading}
                     onSend={sendChatMessage} onClose={() => setIsChatModalOpen(false)}
-                    pendingCourseData={pendingCourseData} onAcceptCourse={acceptCourse} />
+                    pendingCourseData={pendingCourseData} onAcceptCourse={acceptCourse}
+                    autoGenerateSessionCovers={autoGenerateSessionCovers}
+                    level={chatLevel} setLevel={setChatLevel}
+                    durationSessions={chatDurationSessions} setDurationSessions={setChatDurationSessions}
+                    learningStyle={chatLearningStyle} setLearningStyle={setChatLearningStyle}
+                    attachedFiles={chatAttachedFiles} setAttachedFiles={setChatAttachedFiles} />
             )}
             {isCoachFullScreen && isCoachMode && (
                 <CoachFullScreenModal messages={coachMessages} input={coachInput} setInput={setCoachInput}
