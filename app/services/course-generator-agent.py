@@ -48,7 +48,7 @@ from langgraph.graph import StateGraph, START, END
 
 @dataclass
 class Settings:
-    api_key: str = "AIzaSyB1C6OyENmBaHgbmE3nj57LPyyQb_SFG5A"
+    api_key: str = ""
     model: str = "gemini-flash-lite-latest"
 
     debug_logs: bool = True

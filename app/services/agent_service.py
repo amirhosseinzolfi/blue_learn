@@ -1,11 +1,14 @@
 import os
 import time
 import math
-from typing import List, Optional, Generator
+import json
+from typing import List, Optional, Generator, Dict, Any, TypedDict
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.graph import StateGraph, START, END
 
 from app import prompts
 from app.logger import logger
@@ -233,6 +236,364 @@ def parse_data_url(data_url: str):
             pass
     return data_url, None
 
+# --- Profile Patch and Coach Decision Schemas ---
+class ProfilePatch(BaseModel):
+    course_topic: Optional[str] = Field(None, description="Main course topic or skill.")
+    desired_outcome: Optional[str] = Field(None, description="Practical outcome the learner should achieve.")
+    target_learner: Optional[str] = Field(None, description="Who the course is for.")
+    current_level: Optional[str] = Field(None, description="Current learner level.")
+    personal_needs: Optional[str] = Field(None, description="Personal needs, learning style, challenges, or preferences.")
+    business_context: Optional[str] = Field(None, description="Relevant professional or business context.")
+    time_available: Optional[str] = Field(None, description="Available time, duration, deadline, weekly hours, etc.")
+    preferred_format: Optional[str] = Field(None, description="Preferred course format.")
+    language: Optional[str] = Field(None, description="Preferred course language.")
+    constraints: Optional[List[str]] = Field(None, description="Important constraints.")
+    must_include: Optional[List[str]] = Field(None, description="Things the course must include.")
+    must_avoid: Optional[List[str]] = Field(None, description="Things the course should avoid.")
+
+class CoachDecision(BaseModel):
+    profile_patch: ProfilePatch = Field(default_factory=ProfilePatch)
+    missing_information: List[str] = Field(default_factory=list)
+    ready_to_generate: bool = False
+    assistant_message: str
+    debug_notes: str = ""
+
+class ConversationProfileExtraction(BaseModel):
+    profile: ProfilePatch = Field(description="The profile details collected so far from the user's statements in the history.")
+    conversation_summary: str = Field(description="A concise summary of the conversation history so far.")
+
+class CoachState(TypedDict, total=False):
+    user_message: Any  # Can be str or content list for multimodal
+    profile: Dict[str, Any]
+    recent_messages: List[Dict[str, str]]
+    conversation_summary: str
+    assistant_message: str
+    missing_information: List[str]
+    ready_to_generate: bool
+    course_outline: Optional[CourseGenerationSchema]
+    turn_count: int
+    
+    # Custom context fields:
+    user_info: str
+    selected_level: str
+    selected_duration: str
+    selected_learning_style: str
+
+
+def merge_profile(profile: dict, patch: ProfilePatch) -> dict:
+    updated = dict(profile)
+    patch_data = patch.model_dump(exclude_none=True)
+    
+    list_fields = {"constraints", "must_include", "must_avoid"}
+    
+    for key, value in patch_data.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, list) and not value:
+            continue
+            
+        if key in list_fields:
+            old_value = updated.get(key, [])
+            old_list = old_value if isinstance(old_value, list) else [str(old_value)]
+            new_list = value if isinstance(value, list) else [str(value)]
+            
+            merged = list(old_list)
+            for item in new_list:
+                item = str(item).strip()
+                if item and item not in merged:
+                    merged.append(item)
+            updated[key] = merged
+        else:
+            updated[key] = value
+    return updated
+
+
+def build_coach_prompt(state: CoachState) -> str:
+    profile = state.get("profile", {})
+    conversation_summary = state.get("conversation_summary", "")
+    user_info = state.get("user_info", "Not provided")
+    selected_level = state.get("selected_level", "هوشمند")
+    selected_duration = state.get("selected_duration", "هوشمند")
+    selected_learning_style = state.get("selected_learning_style", "هوشمند")
+    
+    return prompts.COURSE_COACH_PROMPT.format(
+        user_info=user_info,
+        profile_json=json.dumps(profile, ensure_ascii=False, indent=2),
+        conversation_summary=conversation_summary or "No summary yet.",
+        selected_level=selected_level,
+        selected_duration=selected_duration,
+        selected_learning_style=selected_learning_style
+    )
+
+
+def format_course_outline_to_markdown(course: CourseGenerationSchema) -> str:
+    md = f"# {course.title}\n\n"
+    md += f"## مشخصات دوره\n"
+    md += f"- **عنوان کوتاه:** {course.short_title}\n"
+    md += f"- **سطح دوره:** {course.level}\n"
+    md += f"- **مدت زمان تخمینی:** {course.total_estimated_hours} ساعت\n"
+    md += f"- **مخاطب هدف:** {course.target_user_summary}\n"
+    md += f"- **هدف اصلی:** {course.course_goal}\n\n"
+    
+    md += f"## توضیحات دوره\n{course.course_description}\n\n"
+    
+    if course.learning_outcomes:
+        md += f"## دستاوردهای یادگیری\n"
+        for outcome in course.learning_outcomes:
+            md += f"- {outcome}\n"
+        md += "\n"
+        
+    if course.prerequisites:
+        md += f"## پیش‌نیازها\n"
+        for prereq in course.prerequisites:
+            md += f"- {prereq}\n"
+        md += "\n"
+        
+    md += f"## برنامه درسی (سرفصل‌ها)\n\n"
+    for ch in course.chapters:
+        md += f"### {ch.title}\n"
+        md += f"*{ch.description}*\n\n"
+        for s in ch.sessions:
+            md += f"#### {s.title}\n"
+            md += f"- *توضیح:* {s.description}\n"
+            if s.learning_objectives:
+                md += f"- *اهداف یادگیری:* {', '.join(s.learning_objectives)}\n"
+            if s.key_concepts:
+                md += f"- *مفاهیم کلیدی:* {', '.join(s.key_concepts)}\n\n"
+                
+    return md
+
+
+# --- Graph Node Functions ---
+
+def add_user_message_node(state: CoachState) -> CoachState:
+    user_message = state.get("user_message")
+    messages = state.get("recent_messages", [])
+    turn_count = state.get("turn_count", 0)
+    
+    # Format message for storing in history
+    display_content = ""
+    if isinstance(user_message, str):
+        display_content = user_message
+    elif isinstance(user_message, list):
+        for part in user_message:
+            if isinstance(part, dict) and part.get("type") == "text":
+                display_content = part.get("text", "")
+        if not display_content:
+            display_content = "[محتوای چندرسانه‌ای]"
+            
+    if user_message:
+        messages = list(messages)
+        messages.append({"role": "user", "content": display_content})
+        turn_count += 1
+        
+    return {
+        "recent_messages": messages,
+        "turn_count": turn_count,
+    }
+
+
+def summarize_history_node(state: CoachState) -> CoachState:
+    messages = state.get("recent_messages", [])
+    old_summary = state.get("conversation_summary", "")
+    
+    to_summarize = messages[:-6]
+    to_keep = messages[-6:]
+    
+    if not to_summarize:
+        return {"recent_messages": messages}
+        
+    prompt = prompts.COURSE_SUMMARY_PROMPT.format(
+        old_summary=old_summary or "No summary yet.",
+        messages_to_summarize=json.dumps(to_summarize, ensure_ascii=False, indent=2)
+    )
+    
+    try:
+        res = get_generator_llm().invoke(prompt)
+        summary = res.content
+        if isinstance(summary, list):
+            summary = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in summary])
+        return {
+            "conversation_summary": summary.strip(),
+            "recent_messages": to_keep
+        }
+    except Exception as e:
+        logger.log_error(f"Error in history summarization: {str(e)}")
+        return {
+            "conversation_summary": old_summary,
+            "recent_messages": messages
+        }
+
+
+def coach_turn_node(state: CoachState) -> CoachState:
+    prompt = build_coach_prompt(state)
+    
+    messages_formatted = []
+    for msg in state.get("recent_messages", []):
+        if msg["role"] == "user":
+            messages_formatted.append(HumanMessage(content=msg["content"]))
+        else:
+            messages_formatted.append(AIMessage(content=msg["content"]))
+            
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", prompt),
+        MessagesPlaceholder(variable_name="history"),
+        ("user", "{user_input}")
+    ])
+    
+    try:
+        structured_llm = get_generator_llm().with_structured_output(CoachDecision)
+        chain = prompt_template | structured_llm
+        
+        user_message = state.get("user_message")
+        
+        decision = chain.invoke({
+            "history": messages_formatted,
+            "user_input": user_message
+        })
+        
+        updated_profile = merge_profile(state.get("profile", {}), decision.profile_patch)
+        
+        return {
+            "profile": updated_profile,
+            "missing_information": decision.missing_information,
+            "ready_to_generate": decision.ready_to_generate,
+            "assistant_message": decision.assistant_message
+        }
+    except Exception as e:
+        logger.log_error(f"Error in coach_turn_node: {str(e)}")
+        return {
+            "assistant_message": "پوزش می‌خواهم، مشکلی در پردازش درخواست شما رخ داد. لطفاً دوباره تلاش کنید.",
+            "ready_to_generate": False
+        }
+
+
+def generate_course_outline_node(state: CoachState) -> CoachState:
+    profile = state.get("profile", {})
+    conversation_summary = state.get("conversation_summary", "")
+    user_info = state.get("user_info", "Not provided")
+    
+    prompt = prompts.COURSE_OUTLINE_PROMPT.format(
+        profile_json=json.dumps(profile, ensure_ascii=False, indent=2),
+        conversation_summary=conversation_summary or "No summary yet.",
+        user_info=user_info
+    )
+    
+    try:
+        structured_llm = get_generator_llm().with_structured_output(CourseGenerationSchema)
+        course_outline = structured_llm.invoke(prompt)
+        
+        markdown_preview = format_course_outline_to_markdown(course_outline)
+        
+        return {
+            "course_outline": course_outline,
+            "assistant_message": markdown_preview,
+            "ready_to_generate": True
+        }
+    except Exception as e:
+        logger.log_error(f"Error in generate_course_outline_node: {str(e)}")
+        return {
+            "assistant_message": "متأسفانه خطایی در تولید سرفصل‌های دوره پیش آمد. لطفاً دوباره درخواست خود را ارسال کنید.",
+            "ready_to_generate": False
+        }
+
+
+def append_assistant_message_node(state: CoachState) -> CoachState:
+    messages = state.get("recent_messages", [])
+    assistant_message = state.get("assistant_message", "")
+    if assistant_message:
+        messages = list(messages)
+        messages.append({"role": "assistant", "content": assistant_message})
+    return {
+        "recent_messages": messages
+    }
+
+
+def route_after_user_message(state: CoachState) -> str:
+    messages = state.get("recent_messages", [])
+    if len(messages) > 10:
+        return "summarize_history"
+    return "coach_turn"
+
+
+def route_after_coach_turn(state: CoachState) -> str:
+    ready = state.get("ready_to_generate") is True
+    has_outline = state.get("course_outline") is not None
+    if ready and not has_outline:
+        return "generate_course_outline"
+    return "append_assistant_message"
+
+
+def build_course_generator_graph():
+    graph = StateGraph(CoachState)
+    
+    graph.add_node("add_user_message", add_user_message_node)
+    graph.add_node("summarize_history", summarize_history_node)
+    graph.add_node("coach_turn", coach_turn_node)
+    graph.add_node("generate_course_outline", generate_course_outline_node)
+    graph.add_node("append_assistant_message", append_assistant_message_node)
+    
+    graph.add_edge(START, "add_user_message")
+    
+    graph.add_conditional_edges(
+        "add_user_message",
+        route_after_user_message,
+        {
+            "summarize_history": "summarize_history",
+            "coach_turn": "coach_turn"
+        }
+    )
+    
+    graph.add_edge("summarize_history", "coach_turn")
+    
+    graph.add_conditional_edges(
+        "coach_turn",
+        route_after_coach_turn,
+        {
+            "generate_course_outline": "generate_course_outline",
+            "append_assistant_message": "append_assistant_message"
+        }
+    )
+    
+    graph.add_edge("generate_course_outline", "append_assistant_message")
+    graph.add_edge("append_assistant_message", END)
+    
+    return graph.compile()
+
+
+def extract_state_from_history(messages: List[dict]) -> tuple[dict, str]:
+    if not messages:
+        return {}, ""
+        
+    history_str = ""
+    for msg in messages:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        content = msg.get("content") or ""
+        history_str += f"{role}: {content}\n"
+        
+    prompt = f"""
+You are an AI assistant helping to extract the structured learning profile and conversation summary from the user's chat history with a course coach.
+
+Analyze the conversation history below and extract:
+1. The profile details collected so far (mapping fields like course_topic, desired_outcome, target_learner, current_level, personal_needs, constraints, must_include, must_avoid, time_available, preferred_format, language, etc.).
+2. A concise summary of the conversation history.
+
+Conversation History:
+{history_str}
+
+Provide the response in the structured format matching ConversationProfileExtraction.
+"""
+    try:
+        structured_llm = get_generator_llm().with_structured_output(ConversationProfileExtraction)
+        result = structured_llm.invoke(prompt)
+        return result.profile.model_dump(exclude_none=True), result.conversation_summary
+    except Exception as e:
+        logger.log_error(f"Error extracting profile from history: {str(e)}")
+        return {}, ""
+
+
 def chat_course_generator(
     messages: List[dict],
     user_info: str = "",
@@ -241,94 +602,101 @@ def chat_course_generator(
     learning_style: Optional[str] = None
 ) -> ChatAgentResponse:
     """
-    Guides the user through dynamic, diagnostic chat steps to refine curriculum needs.
-    Uses structured outputs parsing and supports pre-selected preferences & multimodal input.
+    Guides the user through dynamic, diagnostic chat turns to refine course outlines.
+    Implements a structured LangGraph state workflow.
     """
-    # Format preferences
-    pref_level = level if level and level != "default" else "انتخاب هوشمند (تعیین توسط هوش مصنوعی)"
-    pref_duration = f"{duration_sessions}" if duration_sessions and duration_sessions > 0 else "انتخاب هوشمند (تعیین توسط هوش مصنوعی)"
-    pref_learning_style = learning_style if learning_style and learning_style != "default" else "انتخاب هوشمند (تعیین توسط هوش مصنوعی)"
+    pref_level = level if level and level != "default" else "انتخاب هوشمند"
+    pref_duration = f"{duration_sessions}" if duration_sessions and duration_sessions > 0 else "انتخاب هوشمند"
+    pref_learning_style = learning_style if learning_style and learning_style != "default" else "انتخاب هوشمند"
     
-    system_prompt = prompts.COURSE_GENERATOR_SYSTEM_PROMPT.format(
-        user_info=user_info,
-        selected_level=pref_level,
-        selected_duration=pref_duration,
-        selected_learning_style=pref_learning_style
-    )
-    
-    prompt_template = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="history"),
-    ])
-    
-    langchain_history = []
-    full_conversation_log = ""
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        images = msg.get("images") or []
-        audio = msg.get("audio") or []
-        role_label = "USER" if role == "user" else "ASSISTANT"
-        
-        # Log basic text content or multimedia info
-        multimedia_info = ""
-        if images:
-            multimedia_info += f" [{len(images)} Image(s) Attached]"
-        if audio:
-            multimedia_info += f" [{len(audio)} Audio(s) Attached]"
-        full_conversation_log += f"\n[{role_label}]: {content or ''}{multimedia_info}\n"
-        
-        if role == "user":
-            if images or audio:
-                content_list = []
-                if content:
-                    content_list.append({"type": "text", "text": content})
-                else:
-                    # Provide a fallback text description if user sent media with no text
-                    media_types = []
-                    if images: media_types.append("تصویر")
-                    if audio: media_types.append("فایل صوتی")
-                    content_list.append({"type": "text", "text": f"محتوای چندرسانه‌ای ارسال شد ({', '.join(media_types)})"})
-                
-                for img in images:
-                    content_list.append({
-                        "type": "image_url",
-                        "image_url": {"url": img}
-                    })
-                
-                for aud in audio:
-                    base64_data, mime_type = parse_data_url(aud)
-                    if not mime_type:
-                        mime_type = "audio/mp3"  # default fallback
-                    content_list.append({
-                        "type": "input_audio",
-                        "input_audio": {
-                            "data": base64_data,
-                            "mime_type": mime_type
-                        }
-                    })
-                langchain_history.append(HumanMessage(content=content_list))
-            else:
-                langchain_history.append(HumanMessage(content=content or ""))
-        elif role == "assistant":
-            langchain_history.append(AIMessage(content=content or ""))
-
-    logger.log_process_start("Chat Course Generator", "Handling incoming chat messages")
+    logger.log_process_start("Chat Course Generator", "Restructured LangGraph course generation workflow")
     start_time = time.time()
     
-    chain = prompt_template | get_generator_llm().with_structured_output(ChatAgentResponse)
-    result = chain.invoke({"history": langchain_history})
+    if not messages:
+        logger.log_process_end("Chat Course Generator", time.time() - start_time)
+        return ChatAgentResponse(
+            is_complete=False,
+            chat_response="سلام! من بلو هستم، دستیار هوشمند شما برای طراحی دوره‌های آموزشی شخصی‌سازی شده. چه موضوعی را دوست دارید یاد بگیرید؟",
+            course_data=None
+        )
+        
+    last_msg = messages[-1]
+    last_role = last_msg.get("role", "user")
+    content = last_msg.get("content", "")
+    images = last_msg.get("images") or []
+    audio = last_msg.get("audio") or []
     
-    logger.log_ai_call(
-        step_name="Course Generator Assistant",
-        model_name=get_generator_llm().model,
-        system_prompt=system_prompt,
-        user_input=full_conversation_log.strip(),
-        result=result.model_dump_json(indent=2)
-    )
+    latest_user_content = ""
+    if last_role == "user":
+        if images or audio:
+            content_list = []
+            if content:
+                content_list.append({"type": "text", "text": content})
+            else:
+                media_types = []
+                if images: media_types.append("تصویر")
+                if audio: media_types.append("فایل صوتی")
+                content_list.append({"type": "text", "text": f"محتوای چندرسانه‌ای ارسال شد ({', '.join(media_types)})"})
+            
+            for img in images:
+                content_list.append({
+                    "type": "image_url",
+                    "image_url": {"url": img}
+                })
+            
+            for aud in audio:
+                base64_data, mime_type = parse_data_url(aud)
+                if not mime_type:
+                    mime_type = "audio/mp3"
+                content_list.append({
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": base64_data,
+                        "mime_type": mime_type
+                    }
+                })
+            latest_user_content = content_list
+        else:
+            latest_user_content = content
+            
+    previous_messages = messages[:-1] if last_role == "user" else messages
+    extracted_profile, extracted_summary = extract_state_from_history(previous_messages)
     
+    initial_state = {
+        "user_message": latest_user_content,
+        "profile": extracted_profile,
+        "recent_messages": [{"role": m["role"], "content": m.get("content") or ""} for m in previous_messages],
+        "conversation_summary": extracted_summary,
+        "turn_count": len(previous_messages) // 2,
+        "ready_to_generate": False,
+        "course_outline": None,
+        
+        "user_info": user_info,
+        "selected_level": pref_level,
+        "selected_duration": pref_duration,
+        "selected_learning_style": pref_learning_style
+    }
+    
+    try:
+        graph = build_course_generator_graph()
+        final_state = graph.invoke(initial_state)
+        
+        result = ChatAgentResponse(
+            is_complete=final_state.get("ready_to_generate", False),
+            chat_response=final_state.get("assistant_message"),
+            course_data=final_state.get("course_outline")
+        )
+    except Exception as e:
+        logger.log_error(f"Failed to execute Course Generator Graph: {str(e)}")
+        result = ChatAgentResponse(
+            is_complete=False,
+            chat_response="متأسفانه در پردازش پیام خطایی رخ داد. لطفاً دوباره پیام خود را ارسال کنید.",
+            course_data=None
+        )
+        
     logger.log_process_end("Chat Course Generator", time.time() - start_time)
     return result
+
 
 def chat_coach_stream(
     messages: List[dict],

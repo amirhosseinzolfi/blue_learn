@@ -22,6 +22,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+pip-log.txt
+pip-delete-this-directory.txt
 
 # Environment variables
 .env
@@ -31,24 +33,47 @@ wheels/
 # Databases
 *.db
 *.sqlite3
+backend/*.db
 
-# IDEs
+# IDEs & Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.project
+.classpath
+.settings/
+
+# VS Code history extension
+.history/
 
 # Project specific
 .qodo/
 logs/
 *.log
+server.log
 
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
 # Frontend
 node_modules/
 dist/
 frontend/.env
 frontend/.env.local
+
+# Generated/uploaded content
+generated_media/
+static/uploads/
+
+# Temporary files
+temp_*.txt
+*.tmp
+
+# Windows batch files (if you want to keep local launch scripts private)
+# blue_learn.bat

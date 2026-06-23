@@ -1,11 +1,27 @@
-fastapi
-uvicorn
-sqlalchemy
-pydantic
-pydantic-settings
-python-dotenv
-langchain
-langchain-google-genai
-langchain-core
-google-generativeai
-rich
+# Blue Learn - Core Dependencies
+
+# FastAPI Framework
+fastapi==0.120.1
+uvicorn[standard]==0.38.0
+python-multipart==0.0.20
+
+# Database
+sqlalchemy==2.0.44
+
+# Configuration & Environment
+pydantic==2.12.3
+pydantic-settings==2.8.1
+python-dotenv==1.2.1
+
+# AI/ML - LangChain & Google Gemini
+langchain==0.2.17
+langchain-core==0.3.86
+langchain-google-genai==1.0.10
+langgraph==0.2.76
+langgraph-checkpoint==2.1.2
+langgraph-checkpoint-sqlite==2.0.6
+google-generativeai==0.8.5
+google-genai==1.73.1
+
+# Logging & Utilities
+rich==13.9.4

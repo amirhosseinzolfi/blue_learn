@@ -1,82 +1,149 @@
-# 🧩 Blue Learn: AI-Powered Micro-Learning
+# 🧩 Blue Learn: AI-Powered Micro-Learning Platform
 
-Blue Learn is a modern, streamlined micro-learning platform that transforms any subject into a structured, interactive "puzzle" of bite-sized lessons. Built with **FastAPI** and **React**, it's designed for efficiency with **zero Node.js dependencies**.
+Blue Learn is a modern micro-learning platform that transforms any subject into structured, interactive "puzzle" lessons. Built with **FastAPI** and **React**, it delivers intelligent, bite-sized learning experiences powered by Google Gemini AI.
 
 ---
 
 ## ✨ Key Features
 
-- 🎯 **Intelligent Curriculum Design:** AI agents build comprehensive, non-linear learning paths for any topic.
-- 🧩 **Puzzle-Style Learning:** Break down complex subjects into manageable, micro-sized "puzzles".
-- ✍️ **On-Demand Content:** Each concept is generated as a concise, high-quality Markdown lesson.
-- 🤖 **Contextual AI Coach:** A smart assistant that knows exactly what you're studying and helps you master it.
-- 📈 **Mastery Tracking:** Visual progress indicators and persistent state management.
-- 🚀 **Zero-Build Frontend:** Lightweight React implementation using CDNs for instant deployment.
+- 🎯 **Intelligent Curriculum Design** — AI agents build comprehensive, non-linear learning paths for any topic
+- 🧩 **Puzzle-Style Learning** — Break down complex subjects into manageable micro-lessons
+- ✍️ **On-Demand Content** — Each concept generated as high-quality Markdown lesson
+- 🤖 **Contextual AI Coach** — Smart assistant that adapts to your learning progress
+- 📈 **Mastery Tracking** — Visual progress indicators with persistent state management
+- 🚀 **Zero-Build Frontend** — Lightweight React via CDN for instant deployment
 
 ## 🛠️ Tech Stack
 
 - **Backend:** FastAPI (Python 3.12+)
-- **Frontend:** React (Standalone SPA, CDN-based)
+- **Frontend:** React 18 (CDN-based SPA)
 - **Database:** SQLite with SQLAlchemy ORM
-- **AI Engine:** Google Gemini Pro/Flash via LangChain & LangGraph
-- **Styling:** Custom CSS with Glassmorphism aesthetics
+- **AI Engine:** Google Gemini Pro/Flash via LangChain
+- **Styling:** Custom CSS with modern glassmorphism design
 
 ## 📂 Project Structure
 
 ```text
 blue_learn/
-├── static/              # 🎨 Frontend Assets (HTML, CSS, JS/JSX)
-│   ├── index.html       # Main Entry Point (CDN React)
-│   ├── js/              # React Components & Logic
-│   └── css/             # Modern UI Styling
-├── agents.py            # 🧠 AI Logic & LangChain Workflows
-├── main.py              # 🔌 FastAPI Routes & API Endpoints
-├── models.py            # 📊 Database Schemas
-├── database.py          # 💾 DB Connection & Session Management
-├── requirements.txt     # 📦 Python Dependencies
-└── .env.example         # ⚙️ Template for Environment Variables
+├── app/                    # 🧠 Core Application
+│   ├── api/                # REST API endpoints
+│   ├── services/           # AI agents & business logic
+│   ├── config.py           # Configuration management
+│   ├── database.py         # DB session handling
+│   ├── models.py           # SQLAlchemy models
+│   └── main.py             # FastAPI application
+├── static/                 # 🎨 Frontend Assets
+│   ├── css/                # Styling
+│   ├── js/                 # React components
+│   │   ├── components/     # UI components
+│   │   └── app.jsx         # Main React app
+│   └── index.html          # Entry point
+├── backend/                # 💾 Database storage
+├── scripts/                # 🔧 Utility scripts
+├── main.py                 # 🚀 Application entry point
+├── requirements.txt        # 📦 Python dependencies
+└── .env.example            # ⚙️ Environment template
 ```
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
-### 1. Prerequisites
-- Python 3.12 or higher
-- A Google Gemini API Key ([Get one here](https://aistudio.google.com/))
+### Prerequisites
+- Python 3.12+
+- Google Gemini API Key ([Get one free](https://aistudio.google.com/))
 
-### 2. Installation
+### Installation
+
 ```bash
 # Clone the repository
 git clone https://github.com/amirhosseinzolfi/blue_learn.git
 cd blue_learn
 
-# Create and activate virtual environment
+# Create virtual environment
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Activate virtual environment
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Configuration
-Copy `.env.example` to `.env` and add your API key:
-```env
-GOOGLE_API_KEY=your_gemini_api_key_here
-GENERATOR_MODEL_NAME=gemini-1.5-flash
+### Configuration
+
+1. Copy the example environment file:
+```bash
+cp .env.example .env
 ```
 
-### 4. Run the Application
-```bash
-uvicorn main:app --reload --port 8082
+2. Edit `.env` and add your Google Gemini API key:
+```env
+GOOGLE_API_KEY=your_actual_api_key_here
+GENERATOR_MODEL_NAME=gemini-1.5-flash
+MAIN_MODEL_NAME=gemini-1.5-flash
+COACH_MODEL_NAME=gemini-1.5-flash
+DATABASE_URL=sqlite:///./backend/learning_app.db
 ```
-Access the app at: `http://localhost:8082`
+
+### Run the Application
+
+```bash
+uvicorn main:app --reload --port 8083
+```
+
+Open your browser and navigate to: **http://localhost:8083**
 
 ## 📖 Usage
-1. **Discover:** Enter any subject you want to learn.
-2. **Consult:** Chat with the AI to refine your learning goals.
-3. **Build:** Generate a custom-tailored course outline.
-4. **Learn:** Click on any "puzzle piece" to generate and study micro-content.
-5. **Master:** Mark lessons as complete and track your journey!
+
+1. **Discover** — Enter any subject you want to learn
+2. **Consult** — Chat with AI to refine your learning goals
+3. **Build** — Generate a custom course outline
+4. **Learn** — Click puzzle pieces to generate and study lessons
+5. **Master** — Mark lessons complete and track your progress
+
+## 🎯 API Endpoints
+
+- `GET /` — Frontend application
+- `POST /api/chat` — AI chat interactions
+- `POST /api/courses` — Course generation
+- `GET /api/courses/{id}` — Get course details
+- `POST /api/items/{id}/content` — Generate lesson content
+- `GET /api/profile` — User profile & progress
+
+## 🔧 Development
+
+### Project Architecture
+
+- **Modular Design:** Clean separation between API, services, and data layers
+- **AI Agents:** Specialized agents for course generation and coaching
+- **State Management:** SQLAlchemy models with progress tracking
+- **CDN React:** No build step required, pure ESM modules
+
+### Running in Development Mode
+
+```bash
+uvicorn main:app --reload --port 8083
+```
+
+The `--reload` flag enables hot-reloading during development.
+
+## 📝 License
+
+MIT License - feel free to use this project for learning and development.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+## 📧 Contact
+
+Built with ❤️ by Amir Hossein Zolfi
+
+- GitHub: [@amirhosseinzolfi](https://github.com/amirhosseinzolfi)
+- Project: [Blue Learn](https://github.com/amirhosseinzolfi/blue_learn)
 
 ---
 
-*Built with ❤️ for lifelong learners.*
+*Empowering lifelong learners with AI-driven micro-education.*
