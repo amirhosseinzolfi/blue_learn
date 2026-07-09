@@ -72,8 +72,16 @@ def get_outline(subject: str) -> List[OutlineChapterSchema]:
     ])
     
     # Standard LangChain chain composition using the pipe operator
-    chain = prompt_template | get_content_llm().with_structured_output(CourseOutlineSchema)
+    chain = prompt_template | get_content_llm().with_structured_output(CourseOutlineSchema, method="json_schema")
     result = chain.invoke({"subject": subject})
+    
+    logger.log_ai_call(
+        step_name="Outline Generation Node",
+        model_name=get_content_llm().model,
+        system_prompt=prompts.OUTLINE_GENERATOR_PROMPT,
+        user_input=f"Subject: {subject}\nRequest: Please generate the course outline now.",
+        result=result.model_dump_json(indent=2)
+    )
     
     logger.log_info(f"Generated {len(result.items)} chapters for the outline.")
     logger.log_process_end("Outline Generation", time.time() - start_time)
@@ -238,21 +246,76 @@ def parse_data_url(data_url: str):
 
 # --- Profile Patch and Coach Decision Schemas ---
 class ProfilePatch(BaseModel):
-    course_topic: Optional[str] = Field(None, description="Main course topic or skill.")
-    desired_outcome: Optional[str] = Field(None, description="Practical outcome the learner should achieve.")
-    target_learner: Optional[str] = Field(None, description="Who the course is for.")
-    current_level: Optional[str] = Field(None, description="Current learner level.")
-    personal_needs: Optional[str] = Field(None, description="Personal needs, learning style, challenges, or preferences.")
-    business_context: Optional[str] = Field(None, description="Relevant professional or business context.")
-    time_available: Optional[str] = Field(None, description="Available time, duration, deadline, weekly hours, etc.")
-    preferred_format: Optional[str] = Field(None, description="Preferred course format.")
-    language: Optional[str] = Field(None, description="Preferred course language.")
-    constraints: Optional[List[str]] = Field(None, description="Important constraints.")
-    must_include: Optional[List[str]] = Field(None, description="Things the course must include.")
-    must_avoid: Optional[List[str]] = Field(None, description="Things the course should avoid.")
+    course_topic: str = Field(
+        "",
+        description="Main course topic or skill."
+    )
+
+    course_topic_description: str = Field(
+        "",
+        description=(
+            "Full descriptive information about the course topic. "
+            "This clarifies the exact meaning, scope, angle, and boundaries of the course topic."
+        ),
+    )
+
+    course_goals_and_outcomes: str = Field(
+        "",
+        description=(
+            "The user's goal and intent for this course, plus the outcomes "
+            "they want the learner to achieve."
+        ),
+    )
+
+    target_learner: str = Field(
+        "",
+        description="Who the course is for."
+    )
+
+    current_level: str = Field(
+        "",
+        description="Current learner level."
+    )
+
+    personal_needs: str = Field(
+        "",
+        description="Personal needs, learning style, challenges, or preferences."
+    )
+
+    course_duration: str = Field(
+        "",
+        description=(
+            "How long the course should be, how many sessions/modules it should have, "
+            "or the expected learning timeline."
+        ),
+    )
+
+    preferred_format: str = Field(
+        "",
+        description="Preferred course format: text, video, exercises, projects, coaching, etc."
+    )
+
+    rules: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Rules, important tips, must-follow principles, course requirements, "
+            "and important guidance about how this course should be designed."
+        ),
+    )
+
+    suggested_topics: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Personalized related topics suggested by the chatbot to improve the course. "
+            "These suggestions  should be accepted by the user."
+        ),
+    )
 
 class CoachDecision(BaseModel):
-    profile_patch: ProfilePatch = Field(default_factory=ProfilePatch)
+    profile_patch: ProfilePatch = Field(
+        default_factory=ProfilePatch,
+        description="The complete, accumulated learning profile of the user based on the entire conversation history. Do not output only new changes; output the entire accumulated profile so far."
+    )
     missing_information: List[str] = Field(default_factory=list)
     ready_to_generate: bool = False
     assistant_message: str
@@ -284,7 +347,7 @@ def merge_profile(profile: dict, patch: ProfilePatch) -> dict:
     updated = dict(profile)
     patch_data = patch.model_dump(exclude_none=True)
     
-    list_fields = {"constraints", "must_include", "must_avoid"}
+    list_fields = {"rules", "suggested_topics"}
     
     for key, value in patch_data.items():
         if value is None:
@@ -395,56 +458,29 @@ def add_user_message_node(state: CoachState) -> CoachState:
     }
 
 
-def summarize_history_node(state: CoachState) -> CoachState:
-    messages = state.get("recent_messages", [])
-    old_summary = state.get("conversation_summary", "")
-    
-    to_summarize = messages[:-6]
-    to_keep = messages[-6:]
-    
-    if not to_summarize:
-        return {"recent_messages": messages}
-        
-    prompt = prompts.COURSE_SUMMARY_PROMPT.format(
-        old_summary=old_summary or "No summary yet.",
-        messages_to_summarize=json.dumps(to_summarize, ensure_ascii=False, indent=2)
-    )
-    
-    try:
-        res = get_generator_llm().invoke(prompt)
-        summary = res.content
-        if isinstance(summary, list):
-            summary = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in summary])
-        return {
-            "conversation_summary": summary.strip(),
-            "recent_messages": to_keep
-        }
-    except Exception as e:
-        logger.log_error(f"Error in history summarization: {str(e)}")
-        return {
-            "conversation_summary": old_summary,
-            "recent_messages": messages
-        }
-
-
 def coach_turn_node(state: CoachState) -> CoachState:
+    logger.log_info("Node: coach_turn | Running diagnostic coach step")
     prompt = build_coach_prompt(state)
     
     messages_formatted = []
+    history_log_str = ""
     for msg in state.get("recent_messages", []):
-        if msg["role"] == "user":
-            messages_formatted.append(HumanMessage(content=msg["content"]))
+        role = msg["role"]
+        content = msg["content"]
+        history_log_str += f"[{role}]: {content}\n"
+        if role == "user":
+            messages_formatted.append(HumanMessage(content=content))
         else:
-            messages_formatted.append(AIMessage(content=msg["content"]))
+            messages_formatted.append(AIMessage(content=content))
             
     prompt_template = ChatPromptTemplate.from_messages([
-        ("system", prompt),
+        SystemMessage(content=prompt),
         MessagesPlaceholder(variable_name="history"),
         ("user", "{user_input}")
     ])
     
     try:
-        structured_llm = get_generator_llm().with_structured_output(CoachDecision)
+        structured_llm = get_coach_llm().with_structured_output(CoachDecision, method="json_schema")
         chain = prompt_template | structured_llm
         
         user_message = state.get("user_message")
@@ -454,10 +490,21 @@ def coach_turn_node(state: CoachState) -> CoachState:
             "user_input": user_message
         })
         
+        logger.log_ai_call(
+            step_name="Coach Turn Node",
+            model_name=get_coach_llm().model,
+            system_prompt=prompt,
+            user_input=f"--- Message History ---\n{history_log_str}\n--- Latest User Message ---\n{user_message}",
+            result=decision.model_dump_json(indent=2)
+        )
+        
         updated_profile = merge_profile(state.get("profile", {}), decision.profile_patch)
+        
+        logger.log_success(f"Node: coach_turn | Successfully completed turn. Ready to generate: {decision.ready_to_generate}")
         
         return {
             "profile": updated_profile,
+            "conversation_summary": state.get("conversation_summary", ""),
             "missing_information": decision.missing_information,
             "ready_to_generate": decision.ready_to_generate,
             "assistant_message": decision.assistant_message
@@ -471,10 +518,18 @@ def coach_turn_node(state: CoachState) -> CoachState:
 
 
 def generate_course_outline_node(state: CoachState) -> CoachState:
+    logger.log_info("Node: generate_course_outline | Generating finalized course curriculum")
     profile = state.get("profile", {})
     conversation_summary = state.get("conversation_summary", "")
     user_info = state.get("user_info", "Not provided")
     
+    if not profile or not profile.get("course_topic") or not conversation_summary:
+        logger.log_error("Outline Generation Blocked: Missing full profile patch or conversation summary!")
+        return {
+            "assistant_message": "متأسفانه به دلیل نداشتن خلاصه مکالمه یا اطلاعات کافی در پروفایل، ساخت سرفصل‌های دوره ممکن نیست. لطفاً اطلاعات موضوع دوره را در چت تکمیل کنید.",
+            "ready_to_generate": False
+        }
+        
     prompt = prompts.COURSE_OUTLINE_PROMPT.format(
         profile_json=json.dumps(profile, ensure_ascii=False, indent=2),
         conversation_summary=conversation_summary or "No summary yet.",
@@ -482,10 +537,20 @@ def generate_course_outline_node(state: CoachState) -> CoachState:
     )
     
     try:
-        structured_llm = get_generator_llm().with_structured_output(CourseGenerationSchema)
+        structured_llm = get_generator_llm().with_structured_output(CourseGenerationSchema, method="json_schema")
         course_outline = structured_llm.invoke(prompt)
         
+        logger.log_ai_call(
+            step_name="Generate Course Outline Node",
+            model_name=get_generator_llm().model,
+            system_prompt=prompts.COURSE_OUTLINE_PROMPT,
+            user_input=f"Profile Details JSON:\n{json.dumps(profile, ensure_ascii=False, indent=2)}\n\nConversation Summary:\n{conversation_summary}\n\nUser Profile Info:\n{user_info}",
+            result=course_outline.model_dump_json(indent=2)
+        )
+        
         markdown_preview = format_course_outline_to_markdown(course_outline)
+        
+        logger.log_success(f"Node: generate_course_outline | Outline generated: '{course_outline.title}' with {len(course_outline.chapters)} chapters")
         
         return {
             "course_outline": course_outline,
@@ -501,6 +566,7 @@ def generate_course_outline_node(state: CoachState) -> CoachState:
 
 
 def append_assistant_message_node(state: CoachState) -> CoachState:
+    logger.log_info("Node: append_assistant_message | Saving assistant reply to recent messages")
     messages = state.get("recent_messages", [])
     assistant_message = state.get("assistant_message", "")
     if assistant_message:
@@ -511,18 +577,13 @@ def append_assistant_message_node(state: CoachState) -> CoachState:
     }
 
 
-def route_after_user_message(state: CoachState) -> str:
-    messages = state.get("recent_messages", [])
-    if len(messages) > 10:
-        return "summarize_history"
-    return "coach_turn"
-
-
 def route_after_coach_turn(state: CoachState) -> str:
     ready = state.get("ready_to_generate") is True
     has_outline = state.get("course_outline") is not None
     if ready and not has_outline:
+        logger.log_info("Routing conditional edge: route_after_coach_turn | Ready to generate. Routing to: generate_course_outline")
         return "generate_course_outline"
+    logger.log_info(f"Routing conditional edge: route_after_coach_turn | Ready={ready}, HasOutline={has_outline} -> Routing to: append_assistant_message")
     return "append_assistant_message"
 
 
@@ -530,23 +591,12 @@ def build_course_generator_graph():
     graph = StateGraph(CoachState)
     
     graph.add_node("add_user_message", add_user_message_node)
-    graph.add_node("summarize_history", summarize_history_node)
     graph.add_node("coach_turn", coach_turn_node)
     graph.add_node("generate_course_outline", generate_course_outline_node)
     graph.add_node("append_assistant_message", append_assistant_message_node)
     
     graph.add_edge(START, "add_user_message")
-    
-    graph.add_conditional_edges(
-        "add_user_message",
-        route_after_user_message,
-        {
-            "summarize_history": "summarize_history",
-            "coach_turn": "coach_turn"
-        }
-    )
-    
-    graph.add_edge("summarize_history", "coach_turn")
+    graph.add_edge("add_user_message", "coach_turn")
     
     graph.add_conditional_edges(
         "coach_turn",
@@ -563,43 +613,14 @@ def build_course_generator_graph():
     return graph.compile()
 
 
-def extract_state_from_history(messages: List[dict]) -> tuple[dict, str]:
-    if not messages:
-        return {}, ""
-        
-    history_str = ""
-    for msg in messages:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        content = msg.get("content") or ""
-        history_str += f"{role}: {content}\n"
-        
-    prompt = f"""
-You are an AI assistant helping to extract the structured learning profile and conversation summary from the user's chat history with a course coach.
-
-Analyze the conversation history below and extract:
-1. The profile details collected so far (mapping fields like course_topic, desired_outcome, target_learner, current_level, personal_needs, constraints, must_include, must_avoid, time_available, preferred_format, language, etc.).
-2. A concise summary of the conversation history.
-
-Conversation History:
-{history_str}
-
-Provide the response in the structured format matching ConversationProfileExtraction.
-"""
-    try:
-        structured_llm = get_generator_llm().with_structured_output(ConversationProfileExtraction)
-        result = structured_llm.invoke(prompt)
-        return result.profile.model_dump(exclude_none=True), result.conversation_summary
-    except Exception as e:
-        logger.log_error(f"Error extracting profile from history: {str(e)}")
-        return {}, ""
-
-
 def chat_course_generator(
     messages: List[dict],
     user_info: str = "",
     level: Optional[str] = None,
     duration_sessions: Optional[int] = None,
-    learning_style: Optional[str] = None
+    learning_style: Optional[str] = None,
+    conversation_summary: Optional[str] = None,
+    profile: Optional[dict] = None
 ) -> ChatAgentResponse:
     """
     Guides the user through dynamic, diagnostic chat turns to refine course outlines.
@@ -617,7 +638,9 @@ def chat_course_generator(
         return ChatAgentResponse(
             is_complete=False,
             chat_response="سلام! من بلو هستم، دستیار هوشمند شما برای طراحی دوره‌های آموزشی شخصی‌سازی شده. چه موضوعی را دوست دارید یاد بگیرید؟",
-            course_data=None
+            course_data=None,
+            conversation_summary="",
+            profile={}
         )
         
     last_msg = messages[-1]
@@ -647,7 +670,7 @@ def chat_course_generator(
             for aud in audio:
                 base64_data, mime_type = parse_data_url(aud)
                 if not mime_type:
-                    mime_type = "audio/mp3"
+                     mime_type = "audio/mp3"
                 content_list.append({
                     "type": "input_audio",
                     "input_audio": {
@@ -660,14 +683,68 @@ def chat_course_generator(
             latest_user_content = content
             
     previous_messages = messages[:-1] if last_role == "user" else messages
-    extracted_profile, extracted_summary = extract_state_from_history(previous_messages)
     
+    # Initialize profile with client-passed profile or empty dict
+    accumulated_profile = profile or {}
+    
+    # Pre-populate profile with pre-selected preferences if set (and not "انتخاب هوشمند")
+    if pref_level != "انتخاب هوشمند":
+        accumulated_profile["current_level"] = pref_level
+    if pref_duration != "انتخاب هوشمند":
+        accumulated_profile["course_duration"] = f"{pref_duration} sessions"
+    if pref_learning_style != "انتخاب هوشمند":
+        accumulated_profile["preferred_format"] = pref_learning_style
+        
+    # --- Separate History Summarizer Logic ---
+    # Runs once every 3 turns (6 messages) to summarize the history and trim previous messages
+    turn_count = len(previous_messages) // 2
+    k = (turn_count // 3) * 3
+    
+    current_summary = conversation_summary or ""
+    trimmed_messages = previous_messages
+    
+    if k > 0:
+        messages_to_summarize = previous_messages[:k * 2]
+        trimmed_messages = previous_messages[k * 2:]
+        
+        is_boundary = (turn_count > 0) and (turn_count % 3 == 0)
+        should_summarize = is_boundary or (not current_summary and turn_count >= 3)
+        
+        if should_summarize:
+            logger.log_info(f"Separate History Summarizer | Running separate summary request (turn_count={turn_count}, k={k})")
+            
+            prompt = prompts.COURSE_SUMMARY_PROMPT.format(
+                old_summary=current_summary or "No summary yet.",
+                messages_to_summarize=json.dumps(messages_to_summarize, ensure_ascii=False, indent=2)
+            )
+            
+            try:
+                res = get_generator_llm().invoke(prompt)
+                summary_text = res.content
+                if isinstance(summary_text, list):
+                    summary_text = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in summary_text])
+                current_summary = summary_text.strip()
+                
+                logger.log_ai_call(
+                    step_name="Separate History Summarizer",
+                    model_name=get_generator_llm().model,
+                    system_prompt=prompts.COURSE_SUMMARY_PROMPT,
+                    user_input=f"Old Summary:\n{conversation_summary}\n\nMessages to Summarize:\n{json.dumps(messages_to_summarize, ensure_ascii=False, indent=2)}",
+                    result=current_summary
+                )
+            except Exception as e:
+                logger.log_error(f"Error in separate history summarizer: {str(e)}")
+    else:
+        # Less than 3 turns, clear summary
+        current_summary = ""
+        trimmed_messages = previous_messages
+        
     initial_state = {
         "user_message": latest_user_content,
-        "profile": extracted_profile,
-        "recent_messages": [{"role": m["role"], "content": m.get("content") or ""} for m in previous_messages],
-        "conversation_summary": extracted_summary,
-        "turn_count": len(previous_messages) // 2,
+        "profile": accumulated_profile,
+        "recent_messages": [{"role": m["role"], "content": m.get("content") or ""} for m in trimmed_messages],
+        "conversation_summary": current_summary,
+        "turn_count": len(trimmed_messages) // 2,
         "ready_to_generate": False,
         "course_outline": None,
         
@@ -677,6 +754,37 @@ def chat_course_generator(
         "selected_learning_style": pref_learning_style
     }
     
+    # Format the accumulated profile as a nice string or dict list
+    profile_summary = ""
+    for k_pref, v_pref in initial_state["profile"].items():
+        if v_pref:
+            profile_summary += f"    • {k_pref}: {v_pref}\n"
+    if not profile_summary:
+        profile_summary = "    • (No profile fields extracted yet)\n"
+        
+    logger.log_info(f"Chat Course Generator | Starting LangGraph workflow:")
+    logger.log_info(f"  - User message: {latest_user_content}")
+    logger.log_info(f"  - Trimmed Turn Count: {initial_state['turn_count']}")
+    logger.log_info(f"  - Level Pref: {initial_state['selected_level']}")
+    logger.log_info(f"  - Duration Pref: {initial_state['selected_duration']}")
+    logger.log_info(f"  - Learning Style Pref: {initial_state['selected_learning_style']}")
+    
+    from rich.panel import Panel
+    from rich.text import Text
+    from app.logger import console
+    console.print(Panel(
+        Text(f"Turn Count: {initial_state['turn_count']}\n"
+             f"User Message: {latest_user_content}\n"
+             f"Pre-selected preferences:\n"
+             f"  - Level: {initial_state['selected_level']}\n"
+             f"  - Duration: {initial_state['selected_duration']}\n"
+             f"  - Learning Style: {initial_state['selected_learning_style']}\n\n"
+             f"Accumulated profile patch till now:\n{profile_summary}", style="white"),
+        title="[bold yellow]📋 CURRENT ACCUMULATED PROFILE[/bold yellow]",
+        border_style="yellow",
+        padding=(1, 2)
+    ))
+    
     try:
         graph = build_course_generator_graph()
         final_state = graph.invoke(initial_state)
@@ -684,14 +792,19 @@ def chat_course_generator(
         result = ChatAgentResponse(
             is_complete=final_state.get("ready_to_generate", False),
             chat_response=final_state.get("assistant_message"),
-            course_data=final_state.get("course_outline")
+            course_data=final_state.get("course_outline"),
+            conversation_summary=final_state.get("conversation_summary", ""),
+            profile=final_state.get("profile", {})
         )
+        logger.log_success("Chat Course Generator | LangGraph workflow executed successfully")
     except Exception as e:
         logger.log_error(f"Failed to execute Course Generator Graph: {str(e)}")
         result = ChatAgentResponse(
             is_complete=False,
             chat_response="متأسفانه در پردازش پیام خطایی رخ داد. لطفاً دوباره پیام خود را ارسال کنید.",
-            course_data=None
+            course_data=None,
+            conversation_summary=current_summary,
+            profile=accumulated_profile
         )
         
     logger.log_process_end("Chat Course Generator", time.time() - start_time)
@@ -853,7 +966,7 @@ def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: s
 
     try:
         llm = get_generator_llm()
-        structured_llm = llm.with_structured_output(ProfilerUpdateSchema)
+        structured_llm = llm.with_structured_output(ProfilerUpdateSchema, method="json_schema")
         chain = prompt_template | structured_llm
         
         user_input_formatted = f"User Profile:\n{user_profile}\n\nCurrent Cognitive State:\n{current_state}\n\nRecent Logs:\n{recent_logs}\n\nProvide the updated profile JSON now."
@@ -892,7 +1005,7 @@ def run_incremental_cognitive_profiler(user_profile: str, current_state: str, cu
 
     try:
         llm = get_generator_llm()
-        structured_llm = llm.with_structured_output(IncrementalProfilerUpdateSchema)
+        structured_llm = llm.with_structured_output(IncrementalProfilerUpdateSchema, method="json_schema")
         chain = prompt_template | structured_llm
         
         user_input_formatted = f"User Biographical Profile:\n{user_profile}\n\nCurrent Cognitive Profile:\n{current_state}\n\nCurrent Knowledge Graph Nodes:\n{current_nodes}\n\nNEW Learning Event Details:\n{new_event}"
@@ -943,8 +1056,8 @@ Output ONLY the final image generation prompt in English, with no quotes or intr
 """
 
     prompt_template = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", user_prompt),
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
     ])
     
     chain = prompt_template | get_generator_llm()

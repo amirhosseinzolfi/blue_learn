@@ -49,6 +49,8 @@ function App() {
     const [chatDurationSessions, setChatDurationSessions] = useState(0);
     const [chatLearningStyle, setChatLearningStyle] = useState('default');
     const [chatAttachedFiles, setChatAttachedFiles] = useState([]);
+    const [chatSummary, setChatSummary] = useState('');
+    const [chatProfile, setChatProfile] = useState({});
 
     // ── Auth Handlers ──────────────────────────────────────────────────────
     const handleLogout = () => {
@@ -313,6 +315,57 @@ function App() {
         try { await api.deleteCourse(id); fetchCourses(); setActiveMenu(null); } catch (e) { console.error(e); }
     };
 
+    const togglePublishCourse = async (course) => {
+        // Cloned (enrolled) courses cannot be re-published
+        if (course.source_course_id) {
+            showToast('دوره‌های کپی‌شده از دوره‌های عمومی قابل انتشار مجدد نیستند.', 'error');
+            setActiveMenu(null);
+            return;
+        }
+        try {
+            const updated = course.is_published
+                ? await api.unpublishCourse(course.id)
+                : await api.publishCourse(course.id);
+            // Reflect publish state across local course list + selected course
+            setCourses(prev => prev.map(c => c.id === course.id ? { ...c, is_published: updated.is_published, published_at: updated.published_at } : c));
+            setSelectedCourse(prev => prev && prev.id === course.id ? { ...prev, is_published: updated.is_published, published_at: updated.published_at } : prev);
+            setActiveMenu(null);
+            showToast(course.is_published ? 'دوره از لیست عمومی خارج شد.' : 'دوره با موفقیت برای همه کاربران منتشر شد!');
+        } catch (e) {
+            console.error(e);
+            showToast('خطا در تغییر وضعیت انتشار دوره.', 'error');
+        }
+    };
+
+    const openGlobalCourses = async () => {
+        await syncNow();
+        setCurrentView('global');
+        setSelectedCourse(null);
+        setViewingItem(null);
+    };
+
+    const handleEnrolledFromGlobal = () => {
+        // Refresh the user's own course list so the new cloned course appears
+        fetchCourses();
+    };
+
+    const openEnrolledGlobalCourse = async (course) => {
+        // Find the user's cloned copy of this global course, then open it
+        try {
+            const enrollments = await api.fetchEnrolledIds();
+            const match = enrollments.find(e => e.source_course_id === course.id);
+            if (match) {
+                await selectCourse(match.cloned_course_id);
+                setCurrentView('courses');
+            } else {
+                showToast('ابتدا در این دوره ثبت‌نام کنید.', 'error');
+            }
+        } catch (e) {
+            console.error(e);
+            showToast('خطا در باز کردن دوره', 'error');
+        }
+    };
+
     const openEditCourse = (course) => {
         setEditingCourse(course);
         setCourseSettingsForm({ title: course.title, color: course.color || 'purple', cover_image: null, preview_image: course.cover_image });
@@ -349,9 +402,13 @@ function App() {
                 msgs,
                 chatLevel,
                 chatDurationSessions > 0 ? chatDurationSessions : null,
-                chatLearningStyle
+                chatLearningStyle,
+                chatSummary,
+                chatProfile
             );
             setChatMessages(p => [...p, { role: 'assistant', content: res.chat_response }]);
+            if (res.conversation_summary) setChatSummary(res.conversation_summary);
+            if (res.profile) setChatProfile(res.profile);
             if (res.is_complete && res.course_data) setPendingCourseData(res.course_data);
         } catch { 
             setChatMessages(p => [...p, { role: 'assistant', content: 'خطایی رخ داد. لطفا دوباره تلاش کنید.' }]); 
@@ -414,6 +471,8 @@ function App() {
         setChatDurationSessions(0);
         setChatLearningStyle('default');
         setChatAttachedFiles([]);
+        setChatSummary('');
+        setChatProfile({});
     };
 
     const copyContent = () => {
@@ -461,6 +520,7 @@ function App() {
                             courses={courses} selectedCourse={selectedCourse} viewingItem={viewingItem} setViewingItem={changeViewingItem}
                             onOpenChatModal={openChatModal}
                             onSelectCourse={selectCourse} onBack={() => changeSelectedCourse(null)} onEditCourse={openEditCourse}
+                            onTogglePublish={togglePublishCourse} onOpenGlobalCourses={openGlobalCourses}
                             onDeleteCourse={deleteCourse} onGenerateItem={generateItem} onCompleteItem={completeItem}
                             autoGenerateSessionCovers={autoGenerateSessionCovers} setAutoGenerateSessionCovers={setAutoGenerateSessionCovers}
                             onCopyContent={copyContent} onSendCoach={sendCoachMessage}
@@ -475,6 +535,14 @@ function App() {
                             studyTimer={studyTimer} loadingItemId={loadingItemId}
                             sidebarRatio={sidebarRatio} isDragging={isDragging} startDrag={startDrag} contentRef={contentRef}
                             isTimerPaused={isPaused} setIsTimerPaused={setIsPaused} onManualTimeUpdate={setManualTime}
+                        />
+                    )}
+                    {currentView === 'global' && (
+                        <GlobalCoursesView
+                            onBack={() => setCurrentView('courses')}
+                            onEnrolled={handleEnrolledFromGlobal}
+                            onOpenCourse={openEnrolledGlobalCourse}
+                            showToast={showToast}
                         />
                     )}
                     {currentView === 'micro' && (

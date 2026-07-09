@@ -42,6 +42,21 @@ const api = {
         return api.post(`/courses/${id}/cover`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
     },
 
+    // ── Global Courses catalog (publish / browse / enroll / rate) ──
+    fetchGlobalCourses:  (search = null, sort = 'recent') => {
+        const params = new URLSearchParams();
+        if (search && search.trim()) params.set('search', search.trim());
+        if (sort) params.set('sort', sort);
+        const q = params.toString();
+        return api.get(`/global-courses/${q ? '?' + q : ''}`);
+    },
+    fetchGlobalCourse:   (id)    => api.get(`/global-courses/${id}`),  // includes items (outline)
+    fetchEnrolledIds:    ()      => api.get('/global-courses/enrolled-ids'),
+    publishCourse:       (id)    => api.post(`/courses/${id}/publish`),
+    unpublishCourse:     (id)    => api.post(`/courses/${id}/unpublish`),
+    enrollGlobalCourse:  (id)    => api.post(`/global-courses/${id}/enroll`),
+    rateGlobalCourse:    (id, rating) => api.post(`/global-courses/${id}/rate`, { rating }),
+
     fetchDailyMicro: (count, courseIds, excludeIds) => {
         let url = `/daily-micro-courses?count=${count}`;
         if (courseIds && courseIds.length) url += `&course_ids=${courseIds.join(',')}`;
@@ -53,8 +68,8 @@ const api = {
     generateInsight: ()     => api.post('/generate-insight'),
     rebuildProfile:  ()     => api.post('/profile/rebuild'),
 
-    chatCourseGen: (messages, level = null, duration_sessions = null, learning_style = null) => 
-        api.post('/chat/course-generator', { messages, level, duration_sessions, learning_style }),
+    chatCourseGen: (messages, level = null, duration_sessions = null, learning_style = null, conversation_summary = null, profile = null) => 
+        api.post('/chat/course-generator', { messages, level, duration_sessions, learning_style, conversation_summary, profile }),
 
     coachStream: async (courseId, itemId, message, onChunk) => {
         const headers = { 'Content-Type': 'application/json' };

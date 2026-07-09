@@ -43,6 +43,14 @@ class Course(Base):
     color = Column(String, nullable=True, default="purple")
     cover_image = Column(String, nullable=True)
 
+    # Global publishing state — when True this course is visible in the
+    # shared Global Courses catalog for other users to enroll in.
+    is_published = Column(Boolean, default=False, nullable=False, index=True)
+    published_at = Column(DateTime, nullable=True)
+    # Lineage: if this course was cloned via enrollment, points to the
+    # original globally-published course. NULL for originally authored courses.
+    source_course_id = Column(Integer, ForeignKey("courses.id"), nullable=True, index=True)
+
     user = relationship("User", back_populates="courses")
     items = relationship("OutlineItem", back_populates="course", cascade="all, delete-orphan")
     chat_messages = relationship("CourseChatMessage", back_populates="course", cascade="all, delete-orphan", order_by="CourseChatMessage.id")
@@ -207,15 +215,45 @@ class LearningEventLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("user_profiles.id"))
-    
+
     event_type = Column(String, index=True)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
-    
+
     course_title = Column(String, nullable=True)
     session_title = Column(String, nullable=True)
     study_duration_seconds = Column(Integer, default=0)
-    
+
     raw_interaction_text = Column(Text, nullable=True)
-    vector_embedding_json = Column(Text, nullable=True) 
+    vector_embedding_json = Column(Text, nullable=True)
 
     user = relationship("UserProfile", back_populates="learning_events")
+
+
+class CourseEnrollment(Base):
+    """
+    Tracks a user's enrollment in a globally-published course.
+    `source_course_id` is the original published course; `cloned_course_id`
+    is the fresh raw copy added to the enrolling user's own Courses page.
+    Used to guard against re-enrollment and to count enrollments per course.
+    """
+    __tablename__ = "course_enrollments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    source_course_id = Column(Integer, ForeignKey("courses.id"), index=True, nullable=False)
+    cloned_course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    enrolled_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class CourseRating(Base):
+    """
+    A user's 1–5 star rating on a globally-published course.
+    One row per (user, source course); re-rating updates the existing row.
+    """
+    __tablename__ = "course_ratings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), index=True, nullable=False)
+    rating = Column(Integer, nullable=False)  # 1..5
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

@@ -42,6 +42,8 @@ class ChatAgentResponse(BaseModel):
     is_complete: bool = Field(description="Set to true if you have gathered enough information to generate the course. False if you still need to ask the user questions.")
     chat_response: Optional[str] = Field(description="If is_complete is false, this is the question you ask the user. If is_complete is true, this can be empty.")
     course_data: Optional[CourseGenerationSchema] = Field(description="If is_complete is true, this contains the full generated course data.")
+    conversation_summary: Optional[str] = None
+    profile: Optional[dict] = None
 
 class KnowledgeNodeUpdateSchema(BaseModel):
     """Representing updates to individual concepts inside user's master graph."""
@@ -160,6 +162,8 @@ class ChatRequest(BaseModel):
     level: Optional[str] = None
     duration_sessions: Optional[int] = None
     learning_style: Optional[str] = None
+    conversation_summary: Optional[str] = None
+    profile: Optional[dict] = None
 
 class CoachChatRequest(BaseModel):
     """API payload for posting coach session questions."""
@@ -208,10 +212,55 @@ class CourseOut(BaseModel):
     progress: float
     color: Optional[str] = "purple"
     cover_image: Optional[str] = None
+    is_published: bool = False
+    published_at: Optional[str] = None
+    source_course_id: Optional[int] = None
     items: List[OutlineItemOut]
 
     class Config:
         from_attributes = True
+
+
+class GlobalCourseOut(BaseModel):
+    """Lightweight card data for the shared Global Courses catalog."""
+    id: int
+    title: str
+    short_title: Optional[str] = None
+    description: Optional[str] = None
+    course_description: Optional[str] = None
+    level: Optional[str] = None
+    sessions: Optional[int] = None
+    total_estimated_hours: Optional[int] = None
+    target_user_summary: Optional[str] = None
+    course_goal: Optional[str] = None
+    learning_outcomes: Optional[List[str]] = None
+    prerequisites: Optional[List[str]] = None
+    color: Optional[str] = "purple"
+    cover_image: Optional[str] = None
+    author_name: Optional[str] = None
+    published_at: Optional[str] = None
+    enrollment_count: int = 0
+    is_enrolled: bool = False
+    avg_rating: float = 0.0
+    rating_count: int = 0
+    my_rating: Optional[int] = None
+    items: Optional[List['GlobalOutlineItemOut']] = None
+
+
+class GlobalOutlineItemOut(BaseModel):
+    """Read-only outline item shown in the global course detail page."""
+    id: int
+    session_id: Optional[str] = None
+    title: str
+    chapter: Optional[str] = None
+    chapter_id: Optional[str] = None
+    description: Optional[str] = None
+    order: int
+
+
+class CourseRatingRequest(BaseModel):
+    """API payload for submitting a 1–5 star rating on a global course."""
+    rating: int
 
 class StudyTimeUpdate(BaseModel):
     """API payload containing elapsed focus time additions."""

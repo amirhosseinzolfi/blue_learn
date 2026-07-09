@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.endpoints import settings, courses, items, chat, profile, auth
+from app.api.endpoints import settings, courses, items, chat, profile, auth, global_courses
 
 # Master API Router
 api_router = APIRouter()
@@ -13,3 +13,4 @@ api_router.include_router(courses.router)
 api_router.include_router(items.router)
 api_router.include_router(chat.router)
 api_router.include_router(profile.router)
+api_router.include_router(global_courses.router)

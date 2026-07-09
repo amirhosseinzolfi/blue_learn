@@ -1,4 +1,4 @@
-const { ChevronRight, Settings, BarChart, Clock, BookOpen, Trophy, Play, Pause, CheckCircle, Layout, Copy, RefreshCw, MoreVertical, ChevronLeft, Sparkles, Maximize, Send, X, Loader2, Bot, Zap, Edit2 } = window.Icons;
+const { ChevronRight, Settings, BarChart, Clock, BookOpen, Trophy, Play, Pause, CheckCircle, Layout, Copy, RefreshCw, MoreVertical, ChevronLeft, Sparkles, Maximize, Send, X, Loader2, Bot, Zap, Edit2, Globe } = window.Icons;
 
 function CourseHero({ course, sColor, onBack, onEditCourse, onContinue }) {
     const [isExpanded, setIsExpanded] = React.useState(false);
@@ -381,7 +381,7 @@ function CoachSidebar({ course, viewingItem, vColor, isCoachMode, setIsCoachMode
     );
 }
 
-function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onSelectCourse, onBack, onEditCourse, onDeleteCourse, onGenerateMicro, onGenerateItem, onCompleteItem, onCopyContent, onSendCoach, activeMenu, setActiveMenu, menuRef, sessionMenuRef, isSessionMenuOpen, setIsSessionMenuOpen, copied, isSidebarOpen, setIsSidebarOpen, isCoachMode, setIsCoachMode, isCoachFullScreen, setIsCoachFullScreen, coachMessages, coachInput, setCoachInput, isCoachLoading, coachScrollRef, openChapters, setOpenChapters, studyTimer, loadingItemId, sidebarRatio, isDragging, startDrag, contentRef, isTimerPaused, setIsTimerPaused, onManualTimeUpdate, onOpenChatModal, autoGenerateSessionCovers, setAutoGenerateSessionCovers }) {
+function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onSelectCourse, onBack, onEditCourse, onDeleteCourse, onTogglePublish, onOpenGlobalCourses, onGenerateMicro, onGenerateItem, onCompleteItem, onCopyContent, onSendCoach, activeMenu, setActiveMenu, menuRef, sessionMenuRef, isSessionMenuOpen, setIsSessionMenuOpen, copied, isSidebarOpen, setIsSidebarOpen, isCoachMode, setIsCoachMode, isCoachFullScreen, setIsCoachFullScreen, coachMessages, coachInput, setCoachInput, isCoachLoading, coachScrollRef, openChapters, setOpenChapters, studyTimer, loadingItemId, sidebarRatio, isDragging, startDrag, contentRef, isTimerPaused, setIsTimerPaused, onManualTimeUpdate, onOpenChatModal, autoGenerateSessionCovers, setAutoGenerateSessionCovers }) {
     if (!selectedCourse) {
         if (courses.length === 0) {
             return (
@@ -469,7 +469,7 @@ function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onS
                         </div>
 
                         {/* Large, Glowing & Prominent Action Button CTA */}
-                        <div className="w-full flex justify-center pt-4 relative z-10">
+                        <div className="w-full flex flex-col items-center gap-4 pt-4 relative z-10">
                             <button
                                 onClick={onOpenChatModal}
                                 className="relative group overflow-hidden bg-gradient-to-r from-primary via-indigo-600 to-primary/90 text-white px-10 py-5 rounded-[1.25rem] font-black text-base md:text-lg shadow-[0_0_35px_rgba(168,85,247,0.35)] hover:shadow-[0_0_55px_rgba(168,85,247,0.6)] hover:scale-[1.03] active:scale-[0.98] transition-all duration-300 flex items-center gap-3 cursor-pointer select-none"
@@ -477,6 +477,14 @@ function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onS
                                 <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                                 <Sparkles size={22} className="animate-[spin_5s_linear_infinite] text-purple-200" />
                                 <span>ساخت اولین دوره با هوش مصنوعی بلو</span>
+                            </button>
+                            <button
+                                onClick={onOpenGlobalCourses}
+                                className="group flex items-center gap-2 bg-white/[0.03] hover:bg-primary/10 border border-white/[0.06] hover:border-primary/30 text-slate-300 hover:text-primary px-6 py-3 rounded-2xl font-bold text-sm transition-all"
+                            >
+                                <Globe size={18} className="group-hover:rotate-12 transition-transform" />
+                                <span>یا دوره‌های عمومی کاربران را کاوش کنید</span>
+                                <ChevronLeft size={16} className="opacity-60 group-hover:opacity-100 group-hover:-translate-x-0.5 transition-all" />
                             </button>
                         </div>
                     </div>
@@ -486,9 +494,18 @@ function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onS
 
         return (
             <>
-                <h2 className="text-2xl font-bold mb-8 flex items-center gap-3 text-white"><Layout className="text-primary" size={28} /> دوره‌های شما</h2>
+                <div className="flex items-center justify-between gap-4 flex-wrap mb-8">
+                    <h2 className="text-2xl font-bold flex items-center gap-3 text-white"><Layout className="text-primary" size={28} /> دوره‌های شما</h2>
+                    <button
+                        onClick={onOpenGlobalCourses}
+                        className="group flex items-center gap-2 bg-primary/10 hover:bg-primary/20 border border-primary/25 hover:border-primary/50 text-primary px-5 py-2.5 rounded-2xl font-bold text-sm transition-all hover:shadow-[0_0_25px_rgba(168,85,247,0.25)]"
+                    >
+                        <Globe size={18} className="group-hover:rotate-12 transition-transform" />
+                        <span>کاوش دوره‌های عمومی</span>
+                    </button>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {courses.map(course => <CourseCard key={course.id} course={course} onSelect={onSelectCourse} onEdit={onEditCourse} onDelete={onDeleteCourse} activeMenu={activeMenu} setActiveMenu={setActiveMenu} menuRef={menuRef} />)}
+                    {courses.map(course => <CourseCard key={course.id} course={course} onSelect={onSelectCourse} onEdit={onEditCourse} onDelete={onDeleteCourse} onTogglePublish={onTogglePublish} activeMenu={activeMenu} setActiveMenu={setActiveMenu} menuRef={menuRef} />)}
                 </div>
             </>
         );

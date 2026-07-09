@@ -1,6 +1,6 @@
 // Course list grid card
-function CourseCard({ course, onSelect, onEdit, onDelete, activeMenu, setActiveMenu, menuRef }) {
-    const { Trophy, MoreVertical, Settings, Trash2, BarChart, BookOpen } = window.Icons;
+function CourseCard({ course, onSelect, onEdit, onDelete, onTogglePublish, activeMenu, setActiveMenu, menuRef }) {
+    const { Trophy, MoreVertical, Settings, Trash2, BarChart, BookOpen, Globe, X } = window.Icons;
     const c = getCourseColor(course.color);
     return (
         <div onClick={() => onSelect(course.id)}
@@ -9,6 +9,11 @@ function CourseCard({ course, onSelect, onEdit, onDelete, activeMenu, setActiveM
                 <div className="w-full h-32 md:h-40 rounded-[1.5rem] mb-5 overflow-hidden relative shadow-inner">
                     <img src={course.cover_image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out" />
                     <div className="absolute inset-0 bg-gradient-to-t from-dark-lighter via-dark-lighter/20 to-transparent" />
+                </div>
+            )}
+            {course.is_published && (
+                <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 bg-primary/20 border border-primary/30 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-primary">
+                    <Globe size={11} /> منتشر شده
                 </div>
             )}
             <div className="flex justify-between items-start mb-4">
@@ -23,13 +28,20 @@ function CourseCard({ course, onSelect, onEdit, onDelete, activeMenu, setActiveM
                             <MoreVertical size={18} />
                         </button>
                         {activeMenu === course.id && (
-                            <div className="absolute left-0 mt-2 w-44 bg-dark-lightest border border-purple-900/30 rounded-2xl shadow-2xl shadow-black/50 z-20 overflow-hidden backdrop-blur-xl">
+                            <div className="absolute left-0 mt-2 w-48 bg-dark-lightest border border-purple-900/30 rounded-2xl shadow-2xl shadow-black/50 z-20 overflow-hidden backdrop-blur-xl">
                                 <button onClick={(e) => { e.stopPropagation(); onEdit(course); }}
                                     className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors">
                                     <Settings size={16} className={c.classes.text} /> تنظیمات دوره
                                 </button>
+                                <button onClick={(e) => { e.stopPropagation(); onTogglePublish(course); }}
+                                    className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors border-t border-purple-900/20">
+                                    {course.is_published
+                                        ? <><X size={16} className="text-slate-400" /> لغو انتشار عمومی</>
+                                        : <><Globe size={16} className={c.classes.text} /> انتشار عمومی دوره</>
+                                    }
+                                </button>
                                 <button onClick={(e) => onDelete(course.id, e)}
-                                    className="w-full text-right px-4 py-3 text-sm hover:bg-red-500/10 flex items-center gap-3 text-red-400 transition-colors">
+                                    className="w-full text-right px-4 py-3 text-sm hover:bg-red-500/10 flex items-center gap-3 text-red-400 transition-colors border-t border-purple-900/20">
                                     <Trash2 size={16} /> حذف دوره
                                 </button>
                             </div>

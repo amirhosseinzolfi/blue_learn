@@ -159,6 +159,9 @@ def create_course(
         "progress": progress,
         "color": db_course.color or "purple",
         "cover_image": db_course.cover_image,
+        "is_published": db_course.is_published,
+        "published_at": db_course.published_at.isoformat() if db_course.published_at else None,
+        "source_course_id": db_course.source_course_id,
         "items": items_with_parsed_json
     }
 
@@ -211,6 +214,9 @@ def list_courses(
             "progress": progress,
             "color": course.color or "purple",
             "cover_image": course.cover_image,
+            "is_published": course.is_published,
+            "published_at": course.published_at.isoformat() if course.published_at else None,
+            "source_course_id": course.source_course_id,
             "items": items_with_parsed_json
         })
     return results
@@ -269,6 +275,9 @@ def get_course(
         "progress": progress,
         "color": course.color or "purple",
         "cover_image": course.cover_image,
+        "is_published": course.is_published,
+        "published_at": course.published_at.isoformat() if course.published_at else None,
+        "source_course_id": course.source_course_id,
         "items": items_with_parsed_json
     }
 

@@ -40,7 +40,9 @@ def chat_course_generator_endpoint(
         user_info=user_info,
         level=request.level,
         duration_sessions=request.duration_sessions,
-        learning_style=request.learning_style
+        learning_style=request.learning_style,
+        conversation_summary=request.conversation_summary,
+        profile=request.profile
     )
     return result
 

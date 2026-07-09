@@ -155,7 +155,10 @@ def run_migrations():
                 ("sessions", "INTEGER"),
                 ("chat_summary", "TEXT"),
                 ("color", "VARCHAR"),
-                ("cover_image", "VARCHAR")
+                ("cover_image", "VARCHAR"),
+                ("is_published", "BOOLEAN DEFAULT 0"),
+                ("published_at", "DATETIME"),
+                ("source_course_id", "INTEGER")
             ]
             for col_name, col_type in course_columns:
                 try:
@@ -164,6 +167,40 @@ def run_migrations():
                     logger.log_success(f"Added {col_name} column to courses table")
                 except Exception:
                     pass
+
+            # Create course_enrollments table if not exists — tracks global enrollments
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS course_enrollments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    source_course_id INTEGER,
+                    cloned_course_id INTEGER,
+                    enrolled_at VARCHAR
+                )
+            """))
+            try:
+                conn.execute(text("CREATE INDEX ix_course_enrollments_user_id ON course_enrollments (user_id)"))
+                conn.execute(text("CREATE INDEX ix_course_enrollments_source_course_id ON course_enrollments (source_course_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Create course_ratings table if not exists — user star ratings on global courses
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS course_ratings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    course_id INTEGER,
+                    rating INTEGER,
+                    created_at VARCHAR
+                )
+            """))
+            try:
+                conn.execute(text("CREATE INDEX ix_course_ratings_user_id ON course_ratings (user_id)"))
+                conn.execute(text("CREATE INDEX ix_course_ratings_course_id ON course_ratings (course_id)"))
+                conn.commit()
+            except Exception:
+                pass
 
             # Outline Items Columns
             outline_columns = [
