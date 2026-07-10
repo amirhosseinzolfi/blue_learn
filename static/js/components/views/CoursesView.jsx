@@ -1,7 +1,14 @@
-const { ChevronRight, Settings, BarChart, Clock, BookOpen, Trophy, Play, Pause, CheckCircle, Layout, Copy, RefreshCw, MoreVertical, ChevronLeft, Sparkles, Maximize, Send, X, Loader2, Bot, Zap, Edit2, Globe } = window.Icons;
+const { ChevronRight, Settings, BarChart, Clock, BookOpen, Trophy, Play, Pause, CheckCircle, Layout, Copy, RefreshCw, MoreVertical, ChevronLeft, Sparkles, Maximize, Send, X, Loader2, Bot, Zap, Edit2, Globe, Trash2 } = window.Icons;
 
-function CourseHero({ course, sColor, onBack, onEditCourse, onContinue }) {
+function CourseHero({ course, sColor, onBack, onEditCourse, onContinue, onDelete, onTogglePublish, onCopyCourse }) {
     const [isExpanded, setIsExpanded] = React.useState(false);
+    const [menuOpen, setMenuOpen] = React.useState(false);
+    const menuRef = React.useRef(null);
+    React.useEffect(() => {
+        const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
     const lastId = localStorage.getItem(`last_session_${course.id}`);
     const next = (lastId && course.items.find(i => i.id == lastId)) || course.items.find(i => !i.is_completed);
     
@@ -28,9 +35,39 @@ function CourseHero({ course, sColor, onBack, onEditCourse, onContinue }) {
                     <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white text-sm font-bold bg-dark-lightest/50 px-4 py-2 rounded-xl border border-purple-900/20 hover:bg-dark-lightest transition-all group/back">
                         <ChevronRight size={18} className="group-hover/back:translate-x-1 transition-transform" /> بازگشت به دوره‌ها
                     </button>
-                    <button onClick={onEditCourse} className={`p-2.5 text-slate-400 hover:text-white bg-dark-lightest/50 rounded-xl border border-purple-900/20 hover:bg-dark-lightest ${sColor.classes.hoverBorder} transition-all`}>
-                        <Settings size={20} className={sColor.classes.text} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button onClick={onEditCourse} className={`p-2.5 text-slate-400 hover:text-white bg-dark-lightest/50 rounded-xl border border-purple-900/20 hover:bg-dark-lightest ${sColor.classes.hoverBorder} transition-all`}>
+                            <Settings size={20} className={sColor.classes.text} />
+                        </button>
+                        <div className="relative" ref={menuRef}>
+                        <button onClick={() => setMenuOpen(o => !o)} className={`p-2.5 text-slate-400 hover:text-white bg-dark-lightest/50 rounded-xl border border-purple-900/20 hover:bg-dark-lightest ${sColor.classes.hoverBorder} transition-all`}>
+                            <MoreVertical size={20} className={sColor.classes.text} />
+                        </button>
+                        {menuOpen && (
+                            <div className="absolute left-0 mt-2 w-52 bg-dark-lightest border border-purple-900/30 rounded-2xl shadow-2xl shadow-black/50 z-20 overflow-hidden backdrop-blur-xl">
+                                <button onClick={() => { onEditCourse(); setMenuOpen(false); }}
+                                    className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors">
+                                    <Settings size={16} className={sColor.classes.text} /> تنظیمات دوره
+                                </button>
+                                <button onClick={() => { onTogglePublish(course); setMenuOpen(false); }}
+                                    className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors border-t border-purple-900/20">
+                                    {course.is_published
+                                        ? <><X size={16} className="text-slate-400" /> لغو انتشار عمومی</>
+                                        : <><Globe size={16} className={sColor.classes.text} /> انتشار عمومی دوره</>
+                                    }
+                                </button>
+                                <button onClick={() => { onCopyCourse(course); setMenuOpen(false); }}
+                                    className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors border-t border-purple-900/20">
+                                    <Copy size={16} className={sColor.classes.text} /> کپی محتوای دوره
+                                </button>
+                                <button onClick={(e) => { onDelete(course.id, e); setMenuOpen(false); }}
+                                    className="w-full text-right px-4 py-3 text-sm hover:bg-red-500/10 flex items-center gap-3 text-red-400 transition-colors border-t border-purple-900/20">
+                                    <Trash2 size={16} /> حذف دوره
+                                </button>
+                            </div>
+                        )}
+                        </div>
+                    </div>
                 </div>
                 <div>
                     <h2 className={`text-3xl md:text-4xl font-bold text-white mb-4 tracking-tight ${isEnglish(course.short_title || course.title) ? 'ltr-content' : ''}`}>{course.short_title || course.title}</h2>
@@ -246,7 +283,7 @@ function ItemContent({ item, vColor, studyTimer, isSessionMenuOpen, setIsSession
                             <button onClick={() => setIsSessionMenuOpen(o => !o)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isSessionMenuOpen ? 'bg-dark-lightest text-white' : 'text-slate-400 hover:text-white hover:bg-dark-lightest'}`}><MoreVertical size={20} /></button>
                             {isSessionMenuOpen && (
                                 <div className="absolute left-0 top-full mt-2 w-48 bg-dark-lightest border border-purple-900/30 rounded-2xl shadow-2xl z-20 overflow-hidden backdrop-blur-xl">
-                                    <button onClick={() => { onCopy(); setIsSessionMenuOpen(false); }} className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors">
+                                    <button onClick={() => { onCopy(); }} className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors">
                                         {copied ? <CheckCircle size={16} className="text-green-500" /> : <Copy size={16} className="text-slate-400" />} {copied ? 'کپی شد' : 'کپی متن درس'}
                                     </button>
                                     <button onClick={() => { onRegenerate(item.id); setIsSessionMenuOpen(false); }} className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-primary transition-colors border-t border-purple-900/20">
@@ -381,8 +418,15 @@ function CoachSidebar({ course, viewingItem, vColor, isCoachMode, setIsCoachMode
     );
 }
 
-function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onSelectCourse, onBack, onEditCourse, onDeleteCourse, onTogglePublish, onOpenGlobalCourses, onGenerateMicro, onGenerateItem, onCompleteItem, onCopyContent, onSendCoach, activeMenu, setActiveMenu, menuRef, sessionMenuRef, isSessionMenuOpen, setIsSessionMenuOpen, copied, isSidebarOpen, setIsSidebarOpen, isCoachMode, setIsCoachMode, isCoachFullScreen, setIsCoachFullScreen, coachMessages, coachInput, setCoachInput, isCoachLoading, coachScrollRef, openChapters, setOpenChapters, studyTimer, loadingItemId, sidebarRatio, isDragging, startDrag, contentRef, isTimerPaused, setIsTimerPaused, onManualTimeUpdate, onOpenChatModal, autoGenerateSessionCovers, setAutoGenerateSessionCovers }) {
+function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onSelectCourse, onBack, onEditCourse, onDeleteCourse, onTogglePublish, onOpenGlobalCourses, onGenerateMicro, onGenerateItem, onCompleteItem, onCopyContent, onCopyCourseContent, onSendCoach, activeMenu, setActiveMenu, menuRef, sessionMenuRef, isSessionMenuOpen, setIsSessionMenuOpen, copied, isSidebarOpen, setIsSidebarOpen, isCoachMode, setIsCoachMode, isCoachFullScreen, setIsCoachFullScreen, coachMessages, coachInput, setCoachInput, isCoachLoading, coachScrollRef, openChapters, setOpenChapters, studyTimer, loadingItemId, sidebarRatio, isDragging, startDrag, contentRef, isTimerPaused, setIsTimerPaused, onManualTimeUpdate, onOpenChatModal, autoGenerateSessionCovers, setAutoGenerateSessionCovers, coursesLoading }) {
     if (!selectedCourse) {
+        if (coursesLoading) {
+            return (
+                <div className="flex items-center justify-center min-h-[85vh]">
+                    <Loader2 size={36} className="text-primary animate-spin" />
+                </div>
+            );
+        }
         if (courses.length === 0) {
             return (
                 <div className="flex flex-col items-center justify-center min-h-[85vh] py-6 px-4 animate-in fade-in slide-in-from-bottom-8 duration-700">
@@ -505,7 +549,7 @@ function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onS
                     </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {courses.map(course => <CourseCard key={course.id} course={course} onSelect={onSelectCourse} onEdit={onEditCourse} onDelete={onDeleteCourse} onTogglePublish={onTogglePublish} activeMenu={activeMenu} setActiveMenu={setActiveMenu} menuRef={menuRef} />)}
+                    {courses.map(course => <CourseCard key={course.id} course={course} onSelect={onSelectCourse} onEdit={onEditCourse} onDelete={onDeleteCourse} onTogglePublish={onTogglePublish} onCopyCourse={onCopyCourseContent} activeMenu={activeMenu} setActiveMenu={setActiveMenu} menuRef={menuRef} />)}
                 </div>
             </>
         );
@@ -522,7 +566,7 @@ function CoursesView({ courses, selectedCourse, viewingItem, setViewingItem, onS
 
     return (
         <div className="flex flex-col gap-8">
-            {!viewingItem && <CourseHero course={selectedCourse} sColor={sColor} onBack={onBack} onEditCourse={() => onEditCourse(selectedCourse)} onContinue={navItem} />}
+            {!viewingItem && <CourseHero course={selectedCourse} sColor={sColor} onBack={onBack} onEditCourse={() => onEditCourse(selectedCourse)} onContinue={navItem} onDelete={onDeleteCourse} onTogglePublish={onTogglePublish} onCopyCourse={onCopyCourseContent} />}
             {viewingItem ? (
                 <div className="flex flex-col lg:flex-row gap-3 relative items-start w-full" ref={contentRef}>
                     <div className={`bg-dark-lighter border ${vColor.classes.border} rounded-[2rem] p-6 md:p-10 shadow-[0_0_40px_rgba(0,0,0,0.5)] min-h-[60vh]`}

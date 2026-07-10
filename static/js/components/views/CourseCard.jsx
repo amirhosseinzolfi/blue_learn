@@ -1,6 +1,6 @@
 // Course list grid card
-function CourseCard({ course, onSelect, onEdit, onDelete, onTogglePublish, activeMenu, setActiveMenu, menuRef }) {
-    const { Trophy, MoreVertical, Settings, Trash2, BarChart, BookOpen, Globe, X } = window.Icons;
+function CourseCard({ course, onSelect, onEdit, onDelete, onTogglePublish, onCopyCourse, activeMenu, setActiveMenu, menuRef }) {
+    const { Trophy, MoreVertical, Settings, Trash2, BarChart, BookOpen, Globe, X, Copy } = window.Icons;
     const c = getCourseColor(course.color);
     return (
         <div onClick={() => onSelect(course.id)}
@@ -39,6 +39,10 @@ function CourseCard({ course, onSelect, onEdit, onDelete, onTogglePublish, activ
                                         ? <><X size={16} className="text-slate-400" /> لغو انتشار عمومی</>
                                         : <><Globe size={16} className={c.classes.text} /> انتشار عمومی دوره</>
                                     }
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); onCopyCourse(course); setActiveMenu(null); }}
+                                    className="w-full text-right px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-slate-200 transition-colors border-t border-purple-900/20">
+                                    <Copy size={16} className={c.classes.text} /> کپی محتوای دوره
                                 </button>
                                 <button onClick={(e) => onDelete(course.id, e)}
                                     className="w-full text-right px-4 py-3 text-sm hover:bg-red-500/10 flex items-center gap-3 text-red-400 transition-colors border-t border-purple-900/20">

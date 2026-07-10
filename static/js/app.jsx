@@ -5,6 +5,7 @@ function App() {
     const [token, setToken] = useState(() => localStorage.getItem('token') || null);
     const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('username') || null);
     const [courses, setCourses] = useState([]);
+    const [coursesLoading, setCoursesLoading] = useState(true);
     const [selectedCourse, setSelectedCourse] = useState(null);
     const [viewingItem, setViewingItem] = useState(null);
     const [currentView, setCurrentView] = useState('courses');
@@ -145,7 +146,7 @@ function App() {
     const scrollCoachBottom = () => setTimeout(() => { if (coachScrollRef.current) coachScrollRef.current.scrollTop = coachScrollRef.current.scrollHeight; }, 50);
 
     // ── Data fetching ──────────────────────────────────────────────────────
-    const fetchCourses = () => api.fetchCourses().then(setCourses).catch(console.error);
+    const fetchCourses = () => { setCoursesLoading(true); return api.fetchCourses().then(setCourses).catch(console.error).finally(() => setCoursesLoading(false)); };
     const fetchStats = () => api.fetchStats().then(setStats).catch(console.error);
     const fetchInsights = () => api.fetchInsights().then(setInsights).catch(console.error);
 
@@ -259,11 +260,11 @@ function App() {
         setLoadingItemId(itemId); setLoading(true);
         try {
             const res = await api.generateItem(itemId, autoGenerateSessionCovers);
-            setViewingItem(res); setLoadingItemId(null);
+            setViewingItem(prev => (prev && prev.id === itemId) ? res : prev); setLoadingItemId(null);
             const course = await api.fetchCourse(selectedCourse.id);
             setSelectedCourse(course);
             const fresh = course.items.find(i => i.id === itemId);
-            if (fresh) setViewingItem(fresh);
+            if (fresh) setViewingItem(prev => (prev && prev.id === itemId) ? fresh : prev);
         } catch (e) { console.error(e); } finally { setLoadingItemId(null); setLoading(false); }
     };
 
@@ -475,8 +476,58 @@ function App() {
         setChatProfile({});
     };
 
+    const clipboardWrite = (text) => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text);
+        }
+        // Fallback for non-HTTPS / older browsers
+        const el = document.createElement('textarea');
+        el.value = text; el.style.position = 'fixed'; el.style.opacity = '0';
+        document.body.appendChild(el); el.focus(); el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        return Promise.resolve();
+    };
+
     const copyContent = () => {
-        if (viewingItem?.content) { navigator.clipboard.writeText(viewingItem.content); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+        if (!viewingItem?.content) return;
+        const md = `## ${viewingItem.title}\n\n${viewingItem.content}`;
+        clipboardWrite(md).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(console.error);
+    };
+
+    const copyCourseContent = (course) => {
+        if (!course) return;
+        const lines = [];
+        lines.push(`# ${course.title}`);
+        if (course.course_description || course.description) lines.push(`\n${course.course_description || course.description}`);
+        if (course.level) lines.push(`\n**سطح:** ${course.level}`);
+        if (course.total_estimated_hours || course.hours) lines.push(`**زمان تخمینی:** ${course.total_estimated_hours || course.hours} ساعت`);
+        if (course.course_goal) lines.push(`\n**هدف دوره:** ${course.course_goal}`);
+        if (course.target_user_summary) lines.push(`**مخاطب:** ${course.target_user_summary}`);
+        const outcomes = course.learning_outcomes || [];
+        if (outcomes.length) { lines.push('\n**دستاوردهای یادگیری:**'); outcomes.forEach(o => lines.push(`- ${o}`)); }
+        const prereqs = course.prerequisites || [];
+        if (prereqs.length) { lines.push('\n**پیشنیازها:**'); prereqs.forEach(p => lines.push(`- ${p}`)); }
+
+        // Group items by chapter
+        const items = course.items || [];
+        const chapters = [];
+        const chapterMap = {};
+        items.forEach(item => {
+            const ch = item.chapter || 'بدون فصل';
+            if (!chapterMap[ch]) { chapterMap[ch] = []; chapters.push(ch); }
+            chapterMap[ch].push(item);
+        });
+        chapters.forEach((ch, idx) => {
+            lines.push(`\n# ${idx + 1}. ${ch}`);
+            chapterMap[ch].forEach(item => {
+                lines.push(`\n## ${item.title}`);
+                if (item.content) lines.push(`\n${item.content}`);
+                else lines.push('\n*محتوا هنوز تولید نشده است.*');
+            });
+        });
+
+        clipboardWrite(lines.join('\n')).then(() => showToast('محتوای دوره کپی شد!')).catch(console.error);
     };
 
     const vColor = selectedCourse ? getCourseColor(selectedCourse.color) : getCourseColor('purple');
@@ -523,7 +574,7 @@ function App() {
                             onTogglePublish={togglePublishCourse} onOpenGlobalCourses={openGlobalCourses}
                             onDeleteCourse={deleteCourse} onGenerateItem={generateItem} onCompleteItem={completeItem}
                             autoGenerateSessionCovers={autoGenerateSessionCovers} setAutoGenerateSessionCovers={setAutoGenerateSessionCovers}
-                            onCopyContent={copyContent} onSendCoach={sendCoachMessage}
+                            onCopyContent={copyContent} onCopyCourseContent={copyCourseContent} onSendCoach={sendCoachMessage}
                             activeMenu={activeMenu} setActiveMenu={setActiveMenu} menuRef={menuRef}
                             sessionMenuRef={sessionMenuRef} isSessionMenuOpen={isSessionMenuOpen} setIsSessionMenuOpen={setIsSessionMenuOpen}
                             copied={copied} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
@@ -535,6 +586,7 @@ function App() {
                             studyTimer={studyTimer} loadingItemId={loadingItemId}
                             sidebarRatio={sidebarRatio} isDragging={isDragging} startDrag={startDrag} contentRef={contentRef}
                             isTimerPaused={isPaused} setIsTimerPaused={setIsPaused} onManualTimeUpdate={setManualTime}
+                            coursesLoading={coursesLoading}
                         />
                     )}
                     {currentView === 'global' && (
