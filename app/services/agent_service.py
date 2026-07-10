@@ -246,65 +246,65 @@ def parse_data_url(data_url: str):
 
 # --- Profile Patch and Coach Decision Schemas ---
 class ProfilePatch(BaseModel):
-    course_topic: str = Field(
-        "",
+    course_topic: Optional[str] = Field(
+        None,
         description="Main course topic or skill."
     )
 
-    course_topic_description: str = Field(
-        "",
+    course_topic_description: Optional[str] = Field(
+        None,
         description=(
             "Full descriptive information about the course topic. "
             "This clarifies the exact meaning, scope, angle, and boundaries of the course topic."
         ),
     )
 
-    course_goals_and_outcomes: str = Field(
-        "",
+    course_goals_and_outcomes: Optional[str] = Field(
+        None,
         description=(
             "The user's goal and intent for this course, plus the outcomes "
             "they want the learner to achieve."
         ),
     )
 
-    target_learner: str = Field(
-        "",
+    target_learner: Optional[str] = Field(
+        None,
         description="Who the course is for."
     )
 
-    current_level: str = Field(
-        "",
-        description="Current learner level."
+    course_level: Optional[str] = Field(
+        None,
+        description="Desired course level to generate (e.g., beginner, intermediate, advanced)."
     )
 
-    personal_needs: str = Field(
-        "",
+    personal_needs: Optional[str] = Field(
+        None,
         description="Personal needs, learning style, challenges, or preferences."
     )
 
-    course_duration: str = Field(
-        "",
+    course_duration: Optional[str] = Field(
+        None,
         description=(
             "How long the course should be, how many sessions/modules it should have, "
             "or the expected learning timeline."
         ),
     )
 
-    preferred_format: str = Field(
-        "",
+    preferred_format: Optional[str] = Field(
+        None,
         description="Preferred course format: text, video, exercises, projects, coaching, etc."
     )
 
-    rules: List[str] = Field(
-        default_factory=list,
+    rules: Optional[List[str]] = Field(
+        None,
         description=(
             "Rules, important tips, must-follow principles, course requirements, "
             "and important guidance about how this course should be designed."
         ),
     )
 
-    suggested_topics: List[str] = Field(
-        default_factory=list,
+    suggested_topics: Optional[List[str]] = Field(
+        None,
         description=(
             "Personalized related topics suggested by the chatbot to improve the course. "
             "These suggestions  should be accepted by the user."
@@ -314,7 +314,7 @@ class ProfilePatch(BaseModel):
 class CoachDecision(BaseModel):
     profile_patch: ProfilePatch = Field(
         default_factory=ProfilePatch,
-        description="The complete, accumulated learning profile of the user based on the entire conversation history. Do not output only new changes; output the entire accumulated profile so far."
+        description="Delta update patch containing ONLY fields that are newly discovered, updated, or changed in this turn. Leave all other fields None."
     )
     missing_information: List[str] = Field(default_factory=list)
     ready_to_generate: bool = False
@@ -392,39 +392,42 @@ def build_coach_prompt(state: CoachState) -> str:
 
 
 def format_course_outline_to_markdown(course: CourseGenerationSchema) -> str:
-    md = f"# {course.title}\n\n"
-    md += f"## مشخصات دوره\n"
-    md += f"- **عنوان کوتاه:** {course.short_title}\n"
-    md += f"- **سطح دوره:** {course.level}\n"
-    md += f"- **مدت زمان تخمینی:** {course.total_estimated_hours} ساعت\n"
-    md += f"- **مخاطب هدف:** {course.target_user_summary}\n"
-    md += f"- **هدف اصلی:** {course.course_goal}\n\n"
+    md = f"# 🎓 {course.title}\n\n"
     
-    md += f"## توضیحات دوره\n{course.course_description}\n\n"
+    md += f"## 📋 مشخصات دوره\n"
+    md += f"- 🔹 **عنوان کوتاه:** {course.short_title}\n"
+    md += f"- 📶 **سطح دوره:** {course.level}\n"
+    md += f"- ⏱️ **مدت زمان تخمینی:** {course.total_estimated_hours} ساعت\n"
+    md += f"- 👥 **مخاطب هدف:** {course.target_user_summary}\n"
+    md += f"- 🎯 **هدف اصلی:** {course.course_goal}\n\n"
+    
+    md += f"## 📝 توضیحات دوره\n>{course.course_description}\n\n"
     
     if course.learning_outcomes:
-        md += f"## دستاوردهای یادگیری\n"
+        md += f"## 🏆 دستاوردهای یادگیری\n"
         for outcome in course.learning_outcomes:
-            md += f"- {outcome}\n"
+            md += f"- ✔️ {outcome}\n"
         md += "\n"
         
     if course.prerequisites:
-        md += f"## پیش‌نیازها\n"
+        md += f"## 🛑 پیش‌نیازها\n"
         for prereq in course.prerequisites:
-            md += f"- {prereq}\n"
+            md += f"- 📌 {prereq}\n"
         md += "\n"
         
-    md += f"## برنامه درسی (سرفصل‌ها)\n\n"
-    for ch in course.chapters:
-        md += f"### {ch.title}\n"
-        md += f"*{ch.description}*\n\n"
-        for s in ch.sessions:
-            md += f"#### {s.title}\n"
-            md += f"- *توضیح:* {s.description}\n"
+    md += f"## 📚 برنامه درسی (سرفصل‌ها)\n\n"
+    for ch_idx, ch in enumerate(course.chapters, 1):
+        md += f"### 📂 فصل {ch_idx}: {ch.title}\n"
+        md += f"> 💡 *{ch.description}*\n\n"
+        for s_idx, s in enumerate(ch.sessions, 1):
+            md += f"#### 🔹 جلسه {s_idx}: {s.title}\n"
+            md += f"- 📖 **توضیح:** {s.description}\n"
             if s.learning_objectives:
-                md += f"- *اهداف یادگیری:* {', '.join(s.learning_objectives)}\n"
+                objectives_str = "، ".join(s.learning_objectives)
+                md += f"- 🎯 **اهداف یادگیری:** {objectives_str}\n"
             if s.key_concepts:
-                md += f"- *مفاهیم کلیدی:* {', '.join(s.key_concepts)}\n\n"
+                concepts_str = "، ".join(s.key_concepts)
+                md += f"- 🔑 **مفاهیم کلیدی:** {concepts_str}\n\n"
                 
     return md
 
@@ -462,9 +465,12 @@ def coach_turn_node(state: CoachState) -> CoachState:
     logger.log_info("Node: coach_turn | Running diagnostic coach step")
     prompt = build_coach_prompt(state)
     
+    recent_messages = state.get("recent_messages", [])
+    history_messages = recent_messages[:-1] if (recent_messages and recent_messages[-1]["role"] == "user") else recent_messages
+    
     messages_formatted = []
     history_log_str = ""
-    for msg in state.get("recent_messages", []):
+    for msg in history_messages:
         role = msg["role"]
         content = msg["content"]
         history_log_str += f"[{role}]: {content}\n"
@@ -523,10 +529,10 @@ def generate_course_outline_node(state: CoachState) -> CoachState:
     conversation_summary = state.get("conversation_summary", "")
     user_info = state.get("user_info", "Not provided")
     
-    if not profile or not profile.get("course_topic") or not conversation_summary:
-        logger.log_error("Outline Generation Blocked: Missing full profile patch or conversation summary!")
+    if not profile or not profile.get("course_topic"):
+        logger.log_error("Outline Generation Blocked: Missing full profile patch!")
         return {
-            "assistant_message": "متأسفانه به دلیل نداشتن خلاصه مکالمه یا اطلاعات کافی در پروفایل، ساخت سرفصل‌های دوره ممکن نیست. لطفاً اطلاعات موضوع دوره را در چت تکمیل کنید.",
+            "assistant_message": "متأسفانه به دلیل نداشتن اطلاعات کافی در پروفایل، ساخت سرفصل‌های دوره ممکن نیست. لطفاً اطلاعات موضوع دوره را در چت تکمیل کنید.",
             "ready_to_generate": False
         }
         
@@ -587,16 +593,80 @@ def route_after_coach_turn(state: CoachState) -> str:
     return "append_assistant_message"
 
 
+def summarize_history_node(state: CoachState) -> CoachState:
+    logger.log_info("Node: summarize_history | Condensing older conversation history")
+    messages = state.get("recent_messages", [])
+    old_summary = state.get("conversation_summary", "")
+    
+    keep_messages_count = 6
+    if len(messages) <= keep_messages_count:
+        return {}
+        
+    to_summarize = messages[:-keep_messages_count]
+    to_keep = messages[-keep_messages_count:]
+    
+    prompt = prompts.COURSE_SUMMARY_PROMPT.format(
+        old_summary=old_summary or "No summary yet.",
+        messages_to_summarize=json.dumps(to_summarize, ensure_ascii=False, indent=2)
+    )
+    
+    try:
+        res = get_generator_llm().invoke(prompt)
+        summary_text = res.content
+        if isinstance(summary_text, list):
+            summary_text = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in summary_text])
+        summary_text = summary_text.strip()
+        
+        logger.log_ai_call(
+            step_name="Graph History Summarizer Node",
+            model_name=get_generator_llm().model,
+            system_prompt=prompts.COURSE_SUMMARY_PROMPT,
+            user_input=f"Old Summary:\n{old_summary}\n\nMessages to Summarize:\n{json.dumps(to_summarize, ensure_ascii=False, indent=2)}",
+            result=summary_text
+        )
+        
+        return {
+            "conversation_summary": summary_text,
+            "recent_messages": to_keep
+        }
+    except Exception as e:
+        logger.log_error(f"Error in summarize_history_node: {str(e)}")
+        return {
+            "conversation_summary": old_summary,
+            "recent_messages": messages
+        }
+
+
+def route_after_add_user_message(state: CoachState) -> str:
+    messages = state.get("recent_messages", [])
+    if len(messages) > 10:
+        logger.log_info(f"Routing conditional edge: route_after_add_user_message | Messages count {len(messages)} > 10 -> Routing to: summarize_history")
+        return "summarize_history"
+    logger.log_info(f"Routing conditional edge: route_after_add_user_message | Messages count {len(messages)} <= 10 -> Routing to: coach_turn")
+    return "coach_turn"
+
+
 def build_course_generator_graph():
     graph = StateGraph(CoachState)
     
     graph.add_node("add_user_message", add_user_message_node)
+    graph.add_node("summarize_history", summarize_history_node)
     graph.add_node("coach_turn", coach_turn_node)
     graph.add_node("generate_course_outline", generate_course_outline_node)
     graph.add_node("append_assistant_message", append_assistant_message_node)
     
     graph.add_edge(START, "add_user_message")
-    graph.add_edge("add_user_message", "coach_turn")
+    
+    graph.add_conditional_edges(
+        "add_user_message",
+        route_after_add_user_message,
+        {
+            "summarize_history": "summarize_history",
+            "coach_turn": "coach_turn"
+        }
+    )
+    
+    graph.add_edge("summarize_history", "coach_turn")
     
     graph.add_conditional_edges(
         "coach_turn",
@@ -626,9 +696,26 @@ def chat_course_generator(
     Guides the user through dynamic, diagnostic chat turns to refine course outlines.
     Implements a structured LangGraph state workflow.
     """
-    pref_level = level if level and level != "default" else "انتخاب هوشمند"
-    pref_duration = f"{duration_sessions}" if duration_sessions and duration_sessions > 0 else "انتخاب هوشمند"
-    pref_learning_style = learning_style if learning_style and learning_style != "default" else "انتخاب هوشمند"
+    level_map = {
+        "beginner": "مقدماتی",
+        "intermediate": "متوسط",
+        "advanced": "پیشرفته",
+        "beginner_to_intermediate": "مقدماتی تا متوسط",
+        "default": "انتخاب هوشمند",
+    }
+    pref_level = level_map.get(level.lower(), level) if level else "انتخاب هوشمند"
+    pref_duration = f"{duration_sessions} جلسه" if duration_sessions and duration_sessions > 0 else "انتخاب هوشمند"
+    
+    style_map = {
+        "text": "متنی با مثال‌های کد",
+        "video": "ویدئوهای آموزشی",
+        "exercises": "پروژه‌های عملی و تمرین",
+        "projects": "پروژه‌های عملی و تمرین",
+        "practical": "پروژه‌های عملی و تمرین",
+        "coaching": "همراه با مربیگری",
+        "default": "انتخاب هوشمند",
+    }
+    pref_learning_style = style_map.get(learning_style.lower(), learning_style) if learning_style else "انتخاب هوشمند"
     
     logger.log_process_start("Chat Course Generator", "Restructured LangGraph course generation workflow")
     start_time = time.time()
@@ -689,62 +776,18 @@ def chat_course_generator(
     
     # Pre-populate profile with pre-selected preferences if set (and not "انتخاب هوشمند")
     if pref_level != "انتخاب هوشمند":
-        accumulated_profile["current_level"] = pref_level
+        accumulated_profile["course_level"] = pref_level
     if pref_duration != "انتخاب هوشمند":
-        accumulated_profile["course_duration"] = f"{pref_duration} sessions"
+        accumulated_profile["course_duration"] = pref_duration
     if pref_learning_style != "انتخاب هوشمند":
         accumulated_profile["preferred_format"] = pref_learning_style
-        
-    # --- Separate History Summarizer Logic ---
-    # Runs once every 3 turns (6 messages) to summarize the history and trim previous messages
-    turn_count = len(previous_messages) // 2
-    k = (turn_count // 3) * 3
-    
-    current_summary = conversation_summary or ""
-    trimmed_messages = previous_messages
-    
-    if k > 0:
-        messages_to_summarize = previous_messages[:k * 2]
-        trimmed_messages = previous_messages[k * 2:]
-        
-        is_boundary = (turn_count > 0) and (turn_count % 3 == 0)
-        should_summarize = is_boundary or (not current_summary and turn_count >= 3)
-        
-        if should_summarize:
-            logger.log_info(f"Separate History Summarizer | Running separate summary request (turn_count={turn_count}, k={k})")
-            
-            prompt = prompts.COURSE_SUMMARY_PROMPT.format(
-                old_summary=current_summary or "No summary yet.",
-                messages_to_summarize=json.dumps(messages_to_summarize, ensure_ascii=False, indent=2)
-            )
-            
-            try:
-                res = get_generator_llm().invoke(prompt)
-                summary_text = res.content
-                if isinstance(summary_text, list):
-                    summary_text = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in summary_text])
-                current_summary = summary_text.strip()
-                
-                logger.log_ai_call(
-                    step_name="Separate History Summarizer",
-                    model_name=get_generator_llm().model,
-                    system_prompt=prompts.COURSE_SUMMARY_PROMPT,
-                    user_input=f"Old Summary:\n{conversation_summary}\n\nMessages to Summarize:\n{json.dumps(messages_to_summarize, ensure_ascii=False, indent=2)}",
-                    result=current_summary
-                )
-            except Exception as e:
-                logger.log_error(f"Error in separate history summarizer: {str(e)}")
-    else:
-        # Less than 3 turns, clear summary
-        current_summary = ""
-        trimmed_messages = previous_messages
         
     initial_state = {
         "user_message": latest_user_content,
         "profile": accumulated_profile,
-        "recent_messages": [{"role": m["role"], "content": m.get("content") or ""} for m in trimmed_messages],
-        "conversation_summary": current_summary,
-        "turn_count": len(trimmed_messages) // 2,
+        "recent_messages": [{"role": m["role"], "content": m.get("content") or ""} for m in previous_messages],
+        "conversation_summary": conversation_summary or "",
+        "turn_count": len(previous_messages) // 2,
         "ready_to_generate": False,
         "course_outline": None,
         
