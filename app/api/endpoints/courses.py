@@ -109,14 +109,12 @@ def create_course(
                 f"کاربر دوره جدیدی به نام '{db_course.title}' ایجاد کرد. "
                 f"توضیحات دوره: '{db_course.course_description or 'ندارد'}' | سطح دوره: '{db_course.level or 'نامشخص'}'. "
                 f"این دوره شامل {order} جلسه آموزشی است که به برنامه درسی افزوده شد."
-            )
+            ),
+            is_profiled=False
         )
         db.add(event)
         db.commit()
-        
-        # Trigger background profiling task asynchronously
-        background_tasks.add_task(run_profiling_background_task, current_user.id)
-        logger.log_success("Triggered AI profiler optimization task for newly generated course.")
+        logger.log_success("Saved learning event for newly generated course. Profiling will run in the next batch or nightly.")
 
     # Format return to match CourseOut pydantic schema
     completed = [i for i in db_course.items if i.is_completed]

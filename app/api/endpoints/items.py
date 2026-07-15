@@ -36,15 +36,25 @@ def complete_item(
             event_type="session_complete",
             course_title=item.course.title if item.course else "Unknown",
             session_title=item.title,
-            study_duration_seconds=item.study_time
+            study_duration_seconds=item.study_time,
+            is_profiled=False
         )
         db.add(event)
         
-        # Dispatch asynchronous profiler updates
-        background_tasks.add_task(run_profiling_background_task, current_user.id)
-        
     db.commit()
-    logger.log_success(f"Item {item_id} marked as complete and profiler triggered")
+    
+    if user_profile:
+        unprofiled_complete_count = db.query(models.LearningEventLog).filter(
+            models.LearningEventLog.user_id == user_profile.id,
+            models.LearningEventLog.event_type == "session_complete",
+            models.LearningEventLog.is_profiled == False
+        ).count()
+        
+        if unprofiled_complete_count >= 3:
+            background_tasks.add_task(run_profiling_background_task, current_user.id)
+            logger.log_success(f"Item {item_id} marked as complete. Threshold met ({unprofiled_complete_count}/3). Profiler triggered.")
+        else:
+            logger.log_success(f"Item {item_id} marked as complete. Threshold not met ({unprofiled_complete_count}/3). Profiler deferred.")
     return {"status": "success"}
 
 @router.post("/items/{item_id}/study-time")

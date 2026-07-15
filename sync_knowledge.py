@@ -4,11 +4,12 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from app.database import SessionLocal
+from app.database import SessionLocal, run_migrations
 from app.services.profile_service import rebuild_user_cognitive_profile
 from app.logger import logger
 
 def run():
+    run_migrations()
     db = SessionLocal()
     try:
         logger.log_info("Initiating historical user profile sync via unified profile service...")

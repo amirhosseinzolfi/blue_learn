@@ -120,11 +120,19 @@ def run_migrations():
                     study_duration_seconds INTEGER,
                     raw_interaction_text TEXT,
                     vector_embedding_json TEXT,
+                    is_profiled BOOLEAN DEFAULT 0,
                     FOREIGN KEY(user_id) REFERENCES user_profiles(id)
                 )
             """))
             
             # 2. Add dynamic columns if tables were created with older versions
+            # Learning Event Logs Columns
+            try:
+                conn.execute(text("ALTER TABLE learning_event_logs ADD COLUMN is_profiled BOOLEAN DEFAULT 0"))
+                conn.commit()
+            except Exception:
+                pass
+
             # User Profiles Columns
             for col in ["name", "age", "education_level", "background_experience", "primary_goals", "additional_info", "created_at"]:
                 try:

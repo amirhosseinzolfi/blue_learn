@@ -178,8 +178,6 @@ class CognitiveProfile(Base):
     user_id = Column(Integer, ForeignKey("user_profiles.id"), unique=True)
     
     global_learning_velocity = Column(Float, default=1.0)
-    attention_span_minutes = Column(Integer, default=25)
-    retention_index = Column(Float, default=0.8)
     
     cognitive_data_json = Column(Text, default='{}') 
     interests_json = Column(Text, default='[]')
@@ -205,7 +203,6 @@ class KnowledgeNode(Base):
     category = Column(String, index=True)
     
     mastery_score = Column(Float, default=0.0) 
-    confidence_level = Column(Float, default=0.5) 
     
     dependencies_json = Column(Text, default='{}')
     
@@ -233,6 +230,7 @@ class LearningEventLog(Base):
 
     raw_interaction_text = Column(Text, nullable=True)
     vector_embedding_json = Column(Text, nullable=True)
+    is_profiled = Column(Boolean, default=False, nullable=False)
 
     user = relationship("UserProfile", back_populates="learning_events")
 

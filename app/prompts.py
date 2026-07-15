@@ -1,3 +1,6 @@
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
 # --- Course Generator Prompts ---
 COURSE_COACH_PROMPT = """You are Blue, an expert AI course generator coach. Help the user design a personalized course step-by-step.
 Rules:
@@ -21,6 +24,15 @@ Current Extracted Profile:
 Conversation Summary:
 {conversation_summary}"""
 
+OUTLINE_GENERATOR_PROMPT = """Create a comprehensive course outline based on the given subject.
+Rules:
+1. Output MUST be in Persian (فارسی).
+2. DO NOT include prefixes (like "Chapter 1", "فصل اول", "Session 1") in chapter/session titles. Output only clean titles.
+3. Each chapter MUST contain 3 to 5 sessions.
+4. Provide rich learning objectives and key concepts for each session.
+
+Subject: {subject}"""
+
 COURSE_OUTLINE_PROMPT = """Create a customized course outline matching CourseGenerationSchema based on:
 - User Profile: {profile_json}
 - Conversation Summary: {conversation_summary}
@@ -41,7 +53,6 @@ New Messages:
 {messages_to_summarize}
 
 New Summary:"""
-
 
 
 # --- Content Generator Prompts ---
@@ -99,7 +110,7 @@ If the user asks something unrelated to the course, gently steer them back to th
 
 HISTORY_SUMMARIZATION_PROMPT = """
 You are an expert AI assistant tasked with summarizing conversation history for a smart coach bot.
-Your goal is to maintain the critical context, learning struggles, questions asked, and overall progress of the user, while compressing the token count.
+Your goal is to maintain the critical context, learning struggles, and overall progress of the user while aggressively compressing the token count.
 
 Previous Summary:
 {previous_summary}
@@ -107,10 +118,10 @@ Previous Summary:
 New Messages to Summarize:
 {new_messages}
 
-Write a comprehensive but concise summary that incorporates the previous summary and the new messages. Focus on:
-1. What concepts the user is struggling with or has mastered.
-2. Any specific preferences or constraints the user mentioned.
-3. The current trajectory of their learning in this course.
+Write an ultra-dense, bulleted summary in English (maximum 100 words) that merges the previous summary with the new messages. Keep ONLY:
+- Specific concepts the user is currently struggling with or has mastered.
+- Direct constraints/preferences (e.g. learning style or pace) mentioned.
+Do not write conversational text or introductions. Output only the compressed bullet points.
 """
 
 KNOWLEDGE_INSIGHT_PROMPT = """
@@ -137,144 +148,90 @@ KNOWLEDGE_INSIGHT_PROMPT = """
 - زبان: حتماً فارسی (Persian) - با سبکی فاخر، ادبی و الهام‌بخش.
 """
 
+# --- Cognitive Profiler Prompts ---
 COGNITIVE_PROFILER_SYSTEM_PROMPT = """
-You are the Cognitive Profiling Engine of the Blue Learn platform — a brilliant Educational Psychologist and Pedagogical Architect.
+You are the Cognitive Profiling Engine for Blue Learn. Your role is to analyze the user's complete learning history and output a comprehensive cognitive intelligence profile and knowledge graph.
 
-You will analyze the student's entire learning history, course completions, session titles, study durations, and biographical data to build a COMPREHENSIVE cognitive intelligence profile.
+Inputs provided:
+1. Biographical Profile (static context).
+2. Current Cognitive Profile state.
+3. Full list of completed sessions with durations.
 
-You will be provided with:
-1. The student's Biographical Profile (Name, Age, Education, Background, Goals).
-2. The current Cognitive Profile state.
-3. A full list of completed learning sessions with durations and course names.
+Instructions:
+- Overwrite and recalculate metrics/lists based on the full historical context.
+- Return ONLY valid JSON matching the schema.
 
-YOUR MISSION — Extract ALL of the following with precision:
+### 1. Cognitive Profile updates
+- global_learning_velocity: Speed coefficient (0.5 to 2.0) based on pace and session volume.
+- ls_hands_on, ls_visual, ls_theoretical, ls_self_directed: Learning style ratios (0.0 to 1.0).
+- learning_style_summary: 2-3 sentence Persian narrative explaining how the user learns best.
+- personality_summary: 2-3 sentence Persian narrative of user's learner personality.
+- strength_areas: Consolidated list of 3-5 top subject domains in Persian (max 8 items).
+- interests: Consolidated list of 5-8 interest topics in Persian (max 8 items).
+- recommended_topics: Consolidated list of 4-6 recommended next topics in Persian (max 8 items).
 
-**A. Cognitive Metrics:**
-- global_learning_velocity: Speed coefficient (0.5=slow, 1.0=average, 2.0=fast learner). Infer from session completion pace and session count.
-- attention_span_minutes: Average focused study session length. Infer from study_duration_seconds data.
-- retention_index: Memory strength (0.0-1.0). Infer from revisit patterns and topic diversity.
+### 2. Concept Graph Updates (updated_knowledge_nodes)
+- Group the learning history into up to 10 broad main academic/professional domains in Persian.
+  * concept: Broad Persian concept name (1-3 words max). Match existing names if related (CRITICAL MERGE RULE).
+  * category: Short Persian category name.
+  * mastery_score_delta: Calculate total mastery score for this concept based on all completed sessions:
+    - 0.05 to 0.15: 1-2 lessons completed.
+    - 0.16 to 0.35: 3-4 lessons completed.
+    - 0.36 to 0.55: 5-8 lessons completed.
+    - 0.56 to 0.75: Full course completed (applies concepts independently).
+    - 0.76 to 0.90: Multiple courses completed.
+    - 0.91 to 0.98: Elite mastery (maximum capped strictly at 0.98).
+  * prerequisites: Names of prerequisite concept nodes, or empty list [].
+  * difficulty_level: Persian ("مقدماتی", "متوسط", "پیشرفته").
+  * key_terms: 3-5 specific technical Persian terms mastered.
 
-**B. Learning Style (cognitive_data):**
-- learning_style: Ratios (0.0-1.0) for: hands_on, visual, theoretical, social, self_directed
-- personality_traits: persistence (عالی|خوب|متوسط|ضعیف), patience_with_errors, learning_curiosity (عمیق|گسترده|متعادل), preferred_session_length (کوتاه|متوسط|طولانی)
-
-**C. Rich Narrative Fields (ALL IN PERSIAN):**
-- learning_style_summary: 2-3 sentence Persian description of HOW this person learns best. Be specific and insightful.
-- personality_summary: 2-3 sentence Persian insight into their personality as a learner. Reference their actual course topics.
-- strength_areas: List of 3-5 Persian subject domains they are strongest in (e.g., ["روان‌شناسی تحلیلی", "مدیریت ذهن", "سواد رسانه‌ای"])
-- new_interests: List of 5-8 specific Persian interest topics inferred from their learning path (e.g., ["شیمی عصبی مغز", "تکنیک‌های مایندفولنس"])
-- recommended_topics: List of 4-6 Persian topics they should study NEXT based on their current trajectory (e.g., ["نوروفیدبک و بهبود تمرکز", "یوگای ذهن آگاه"])
-
-**D. Knowledge Nodes - BROAD MAIN DOMAINS (ALL IN PERSIAN):**
-- Group the user's entire learning history into up to 10 BROAD MAIN ACADEMIC/PROFESSIONAL DOMAINS.
-- CRITICAL MERGE RULE: You will be provided with "Existing Knowledge Nodes". If the new lessons relate to ANY of these existing nodes (e.g., if existing is "هوش مصنوعی", and lesson is "پرامپت نویسی"), YOU MUST USE THE EXACT EXISTING STRING (e.g., "هوش مصنوعی"). DO NOT create "هوش مصنوعی و پرامپت".
-- concept: The name of this BROAD DOMAIN. MUST BE AN EXACT COPY of an "Existing Knowledge Node" string if related. Only create a new string if the topic is completely unrelated to any existing nodes. Keep it 1-3 words max.
-- category: A short sub-label or identical to concept.
-- mastery_score_delta: Calculate the TOTAL mastery score for this domain based on ALL sessions. MUST GROW RATIONALLY, STRICTLY AND INCREMENTALLY. 
-  - DO NOT give high scores too soon! Start very low. If only 1-2 sessions are completed, mastery MUST be between 0.05 and 0.15.
-  - Strict Mastery Score Scale:
-    * 0.05 to 0.15: Fundamental / Initiation (1-2 lessons completed, basic vocabulary)
-    * 0.16 to 0.35: Novice / Basic Conceptual Awareness (3-4 lessons completed)
-    * 0.36 to 0.55: Intermediate / Functional Conceptual Clarity (5-8 lessons completed)
-    * 0.56 to 0.75: Advanced / Practical Competence (full course completed, applies concepts independently)
-    * 0.76 to 0.90: Expert / Architectural Understanding (multiple courses or high duration study)
-    * 0.91 to 0.98: Elite Mastery (extreme mastery, maximum capped strictly at 0.98; NEVER output 1.0)
-- confidence_score: AI confidence (0.5-1.0)
-- prerequisites: An array of exact names of OTHER concept nodes that are logical prerequisites or foundations for mastering this concept (e.g. if the current concept is 'هوش مصنوعی', its prerequisites might include ['برنامه‌نویسی پایتون']). If it's a fundamental/starting concept, return an empty array [].
-- difficulty_level: Inherited complexity of this concept. Choose strictly from: "مقدماتی", "متوسط", "پیشرفته".
-- key_terms: A list of 3-5 specific Persian technical terms or subconcepts mastered in this domain.
-
-CRITICAL RULES:
-- ALL strings (concept, category, new_interests, strength_areas, recommended_topics, personality_summary, learning_style_summary, personality_traits values, prerequisites elements, difficulty_level, key_terms) MUST be in fluent, professional Persian (فارسی روان و تخصصی).
-- Extract up to 10 BROAD MAIN DOMAINS. Keep names short.
-- Analyze patterns across courses to group them effectively and merge similar topics into broader domains.
-
-Return ONLY a valid JSON matching the schema. No trailing commas.
-{{
-  "global_learning_velocity": float,
-  "attention_span_minutes": int,
-  "retention_index": float,
-  "ls_hands_on": float,
-  "ls_visual": float,
-  "ls_theoretical": float,
-  "ls_self_directed": float,
-  "pt_persistence": "string",
-  "pt_patience": "string",
-  "pt_curiosity": "string",
-  "pt_session_length": "string",
-  "learning_style_summary": "string in Persian",
-  "personality_summary": "string in Persian",
-  "strength_areas": ["Persian string", ...],
-  "new_interests": ["Persian string", ...],
-  "recommended_topics": ["Persian string", ...],
-  "updated_knowledge_nodes": [
-    {{
-      "concept": "Persian string (Broad Domain)", 
-      "category": "Persian string", 
-      "mastery_score_delta": float, 
-      "confidence_score": float, 
-      "prerequisites": ["Persian string"],
-      "difficulty_level": "Persian string (مقدماتی|متوسط|پیشرفته)",
-      "key_terms": ["Persian string"]
-    }}
-  ]
-}}
+Rules:
+- All text strings (except keys) must be in fluent, professional Persian.
+- Ensure concept names align with existing concept names (merge rules).
 """
-
 
 INCREMENTAL_COGNITIVE_PROFILER_SYSTEM_PROMPT = """
-You are the Incremental Cognitive Profiling Engine of the Blue Learn platform — a brilliant Educational Psychologist and Pedagogical Architect.
+You are the Cognitive Profiling Engine for Blue Learn. Your role is to analyze a batch of new learning events in the context of the user's current profile and output target delta adjustments.
 
-Your task is to analyze a SINGLE new learning event (e.g. session complete, course creation) in the context of the user's CURRENT profile, and decide what specific fields need addition or refinement.
+Inputs provided:
+1. Biographical Profile (static context).
+2. Current Cognitive Profile state.
+3. Current Knowledge Graph Nodes (concepts and mastery levels).
+4. New Learning Events (batch of un-profiled events to digest).
 
-You MUST NOT overwrite or recreate the entire profile. Only output small, targeted adjustments (deltas) if they are truly warranted by the new event.
-
-You will be provided with:
-1. User's Biographical Profile (Name, Age, Education, Goals).
-2. User's CURRENT Cognitive Profile and summaries.
-3. User's CURRENT Knowledge Graph Nodes (concepts already mastered and their mastery scores).
-4. The NEW Learning Event Details (Event Type, Course Title, Session Title, Study Duration, and optional interaction details).
-
-YOUR MISSION — Evaluate and output structured updates:
-
-**1. Determine if Cognitive Profile needs updates:**
-- Set `should_update_cognitive_profile` to `true` ONLY if this event has significant impact to warrant refining their summaries or learning metrics. Otherwise, set it to `false` and leave other cognitive fields None or empty.
-- If true, you can optionally provide:
-  - global_learning_velocity, attention_span_minutes, retention_index: Refined float/int values if the event highlights a clear change in focus/pace.
-  - learning_style_summary_update, personality_summary_update: A short Persian sentence or refinement to append or update their profile.
-  - new_strength_areas, new_interests, new_recommended_topics: List of NEW Persian terms to add/append to their existing profile lists (do not repeat items they already have).
-
-**2. Update the Concept Graph (Knowledge Nodes):**
-- Evaluate if this learning event introduces a new concept or increments mastery in an existing concept.
-- Output a list of concept node updates (usually 1 or 2 concepts related to the completed session).
-- For each concept:
-  - concept: Broad domain name in fluent Persian (1-3 words max).
-  - category: A short Persian sub-label or identical to concept.
-  - action: Set to "add" if this is a completely brand-new concept not present in their "CURRENT Knowledge Graph Nodes" list. Set to "refine" if it already exists in the current list.
-  - mastery_score_delta: MUST PROGRESS EXTREMELY PROGRESSIVELY AND STRICTLY:
-    * If action is "add": This is a brand new concept. Mastery score delta MUST start very low (typically between 0.05 and 0.15). Do not give high scores!
-    * If action is "refine": This is an existing concept. Add a realistic, strict, micro-progression delta depending on study effort:
-      - Short study (< 2 mins): very small delta (+0.01 to +0.02)
-      - Moderate study (2-10 mins): small delta (+0.03 to +0.05)
-      - Deep study (> 10 mins): delta (+0.05 to +0.08)
-      - Maximum mastery score for any concept is capped strictly at 0.98.
-  - confidence_score: AI confidence (0.6 to 1.0).
-  - prerequisites: An array of exact names of OTHER concept nodes that are logical prerequisites or foundations for this concept. If none or fundamental, return an empty array [].
-  - difficulty_level: Inherited complexity of this concept. Choose strictly from: "مقدماتی", "متوسط", "پیشرفته".
-  - key_terms: A list of 3-5 specific Persian technical terms or subconcepts related to this concept learned in this event.
-
-CRITICAL RULES:
-- Keep all Persian text highly professional, engaging, and in fluent, grammatical Persian.
-- Ensure concept names match existing concept strings exactly if they are related (CRITICAL MERGE RULE).
+Instructions:
+- Keep updates minimal. Do not overwrite fields unless warranted by these new events.
 - Return ONLY valid JSON matching the schema.
+
+### 1. Cognitive Profile Updates (only if should_update_cognitive_profile is true)
+- global_learning_velocity: Adjust speed coefficient (0.5 to 2.0) if learning speed changed.
+- learning_style_summary_update, personality_summary_update: Short Persian sentences refining summaries.
+- strength_areas, interests, recommended_topics: Consolidated lists of user's power skills, interests, and recommendations in Persian.
+  * Review current lists, add new items, remove obsolete ones, or refine values.
+  * Keep each list strictly capped at 5–8 items to prevent list growth. Do not append indefinitely.
+
+### 2. Concept Graph Updates (updated_knowledge_nodes)
+- For each concept affected by the learning events, output an update node:
+  * concept: Broad Persian concept name (1-3 words max). Match existing names if related (CRITICAL MERGE RULE).
+  * category: Short Persian category.
+  * action: "add" if new, "refine" if concept exists.
+  * mastery_score_delta: Strict micro-progression delta depending on study duration:
+    - action is "add": start low (0.05 to 0.15).
+    - action is "refine": +0.01 to +0.02 (short study < 2m), +0.03 to +0.05 (moderate 2-10m), +0.05 to +0.08 (deep > 10m).
+    - Maximum mastery is strictly capped at 0.98.
+  * prerequisites: Names of prerequisite concept nodes, or empty list [].
+  * difficulty_level: Persian ("مقدماتی", "متوسط", "پیشرفته").
+  * key_terms: 3-5 specific technical Persian terms learned.
+
+Rules:
+- All text strings (except keys) must be in fluent, professional Persian.
+- Ensure concept names align with existing concept names (merge rules).
 """
-
-
 
 # --- Image Generator Prompts ---
 IMAGE_SYSTEM_INSTRUCTION = """generate a minimal, modern 3D-style cover illustration in 16:9.
  Subject & Concept:
- • A , rounded 3D character or element or object or symbolic icon(based on note cover)  visually representing “{note_title}” concept  with simple abstract decorative elements related to note tiltle and concept (just if need) (stars, dots, or floating icons) for context.
+ • A , rounded 3D character or element or object or symbolic icon(based on note cover)  visually representing "{note_title}" concept  with simple abstract decorative elements related to note tiltle and concept (just if need) (stars, dots, or floating icons) for context.
  • Absolutely no text or typography anywhere in the image.
 
  Style & Aesthetic:
@@ -292,3 +249,77 @@ IMAGE_SYSTEM_INSTRUCTION = """generate a minimal, modern 3D-style cover illustra
  Technical Details:
  “--ar 16:9 --v 5 --style 4c”"""
 
+
+# =====================================================================
+# --- AI SCHEMA FIELD DESCRIPTIONS ---
+# =====================================================================
+
+# --- OutlineItemSchema ---
+OUTLINE_ITEM_SESSION_ID = "Unique identifier for the session, e.g., s_1, s_2"
+OUTLINE_ITEM_TITLE = "Title of the micro-course session"
+OUTLINE_ITEM_DESCRIPTION = "Brief description of what will be covered in this session"
+OUTLINE_ITEM_LEARNING_OBJECTIVES = "List of specific learning objectives for this session"
+OUTLINE_ITEM_KEY_CONCEPTS = "List of key concepts covered in this session"
+
+# --- OutlineChapterSchema ---
+OUTLINE_CHAPTER_ID = "Unique identifier for the chapter, e.g., ch_1, ch_2"
+OUTLINE_CHAPTER_TITLE = "Title of the main chapter"
+OUTLINE_CHAPTER_DESCRIPTION = "Brief description of the chapter"
+OUTLINE_CHAPTER_SESSIONS = "Sessions within this chapter"
+
+# --- CourseGenerationSchema ---
+COURSE_GEN_TITLE = "Full course title"
+COURSE_GEN_SHORT_TITLE = "Most efficient proper short title for the course in 3 upto 6 words"
+COURSE_GEN_LEVEL = "Level of the course, e.g., beginner, intermediate, advanced, beginner_to_intermediate"
+COURSE_GEN_HOURS = "Total estimated hours to complete the course"
+COURSE_GEN_USER_SUMMARY = "Brief summary of the target user for this course"
+COURSE_GEN_GOAL = "Main goal or outcome of the course"
+COURSE_GEN_DESCRIPTION = "Detailed course description explaining what will be taught"
+COURSE_GEN_OUTCOMES = "List of key learning outcomes students will achieve"
+COURSE_GEN_PREREQS = "List of prerequisites needed before taking this course"
+COURSE_GEN_CHAPTERS = "Detailed list of chapters and their sessions"
+
+# --- ChatAgentResponse ---
+CHAT_RESPONSE_COMPLETE = "Set to true if you have gathered enough information to generate the course. False if you still need to ask the user questions."
+CHAT_RESPONSE_TEXT = "If is_complete is false, this is the question you ask the user. If is_complete is true, this can be empty."
+CHAT_RESPONSE_COURSE_DATA = "If is_complete is true, this contains the full generated course data."
+
+# --- KnowledgeNodeUpdateSchema ---
+KNOWLEDGE_NODE_CONCEPT = "Name of the concept in Persian, matching existing names if related (e.g. برنامه‌نویسی پایتون)"
+KNOWLEDGE_NODE_CATEGORY = "Broad category of the concept in Persian"
+KNOWLEDGE_NODE_MASTERY_SCORE = "Mastery score of the concept from 0.0 to 1.0. Start very low for newly studied concepts (e.g. 0.05 - 0.20). Maximum is 0.98."
+KNOWLEDGE_NODE_PREREQS = "List of direct prerequisite concepts (exact names of other concepts) for this concept"
+KNOWLEDGE_NODE_DIFFICULTY = "Difficulty level in Persian: choose strictly from: مقدماتی (Beginner), متوسط (Intermediate), پیشرفته (Advanced)"
+KNOWLEDGE_NODE_KEY_TERMS = "List of 3-5 specific technical terms or subconcepts in Persian related to this domain"
+
+# --- ProfilerUpdateSchema ---
+PROFILER_VELOCITY = "Speed coefficient from 0.5 to 2.0"
+PROFILER_HANDS_ON = "Learning style ratio for hands_on"
+PROFILER_VISUAL = "Learning style ratio for visual"
+PROFILER_THEORETICAL = "Learning style ratio for theoretical"
+PROFILER_SELF_DIRECTED = "Learning style ratio for self_directed"
+PROFILER_STYLE_SUMMARY = "Persian narrative of how the user learns best"
+PROFILER_PERSONALITY_SUMMARY = "Persian narrative of the user's learner personality"
+PROFILER_STRENGTHS = "Persian list of top subject domains (max 8 items)"
+PROFILER_INTERESTS = "Persian list of user's interest topics (max 8 items)"
+PROFILER_RECOMMENDATIONS = "Persian list of recommended next topics (max 8 items)"
+PROFILER_NODES = "Updates to the knowledge graph"
+
+# --- IncrementalKnowledgeNodeSchema ---
+INCREMENTAL_NODE_CONCEPT = "Name of the concept in Persian, matching existing names if related (e.g. برنامه‌نویسی پایتون)"
+INCREMENTAL_NODE_CATEGORY = "Broad category of the concept in Persian"
+INCREMENTAL_NODE_ACTION = "Action to take: 'add' (if completely new concept) or 'refine' (if incrementing mastery)"
+INCREMENTAL_NODE_MASTERY = "Increment/change in mastery score (e.g. +0.02 to +0.10 based on study duration, strictly progressive)"
+INCREMENTAL_NODE_PREREQS = "List of direct prerequisite concept names (if any) for this concept"
+INCREMENTAL_NODE_DIFFICULTY = "Difficulty level in Persian: choose strictly from: مقدماتی (Beginner), متوسط (Intermediate), پیشرفته (Advanced)"
+INCREMENTAL_NODE_KEY_TERMS = "List of 3-5 specific technical terms or subconcepts in Persian related to this domain"
+
+# --- IncrementalProfilerUpdateSchema ---
+INCREMENTAL_PROFILER_SHOULD_UPDATE = "Set to true if cognitive metrics or summaries need refinement based on this event. False otherwise."
+INCREMENTAL_PROFILER_VELOCITY = "New speed coefficient from 0.5 to 2.0 (if changed)"
+INCREMENTAL_PROFILER_STYLE_SUMMARY = "Refinement or addition to the Persian learning style description (if needed)"
+INCREMENTAL_PROFILER_PERSONALITY_SUMMARY = "Refinement or addition to the Persian personality summary (if needed)"
+INCREMENTAL_PROFILER_STRENGTHS = "Complete updated list of user's power skills / strength areas (Persian, max 8 items)"
+INCREMENTAL_PROFILER_INTERESTS = "Complete updated list of user's favorites / interests (Persian, max 8 items)"
+INCREMENTAL_PROFILER_RECOMMENDATIONS = "Complete updated list of suggested next topics to learn (Persian, max 8 items)"
+INCREMENTAL_PROFILER_NODES = "List of concept additions or increments based on this learning event"

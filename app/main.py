@@ -54,3 +54,9 @@ def serve_react_app(full_path: str):
     else:
         # Graceful return if index.html is missing
         return {"status": "success", "message": "Backend API is online. Frontend resources not found."}
+
+@app.on_event("startup")
+def startup_event():
+    import asyncio
+    from app.services.profile_service import nightly_profile_updater
+    asyncio.create_task(nightly_profile_updater())

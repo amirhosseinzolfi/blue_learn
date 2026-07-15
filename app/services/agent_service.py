@@ -247,16 +247,13 @@ def generate_history_summary(messages: List[dict], current_summary: str = None, 
         role = "User" if msg["role"] == "user" else "AI"
         chat_history_str += f"{role}: {msg['content']}\n"
         
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "Progressively summarize the lines of conversation provided, adding onto the previous summary returning a new summary."),
-        ("user", "Current summary:\n{current_summary}\n\nNew lines of conversation:\n{new_lines}\n\nNew summary:")
-    ])
+    prompt_text = prompts.HISTORY_SUMMARIZATION_PROMPT.format(
+        previous_summary=current_summary or "No summary yet.",
+        new_messages=chat_history_str
+    )
     
-    chain = prompt | get_coach_llm(api_key, coach_model)
-    res = chain.invoke({
-        "current_summary": current_summary or "No summary yet.",
-        "new_lines": chat_history_str
-    })
+    llm = get_coach_llm(api_key, coach_model)
+    res = llm.invoke(prompt_text)
     
     summary_content = res.content
     if isinstance(summary_content, list):
@@ -264,13 +261,13 @@ def generate_history_summary(messages: List[dict], current_summary: str = None, 
     
     logger.log_ai_call(
         step_name="Background History Summarization",
-        model_name=get_coach_llm(api_key, coach_model).model,
-        system_prompt="Progressively summarize the lines of conversation provided...",
+        model_name=llm.model,
+        system_prompt=prompts.HISTORY_SUMMARIZATION_PROMPT,
         user_input=f"Previous Summary:\n{current_summary or 'None'}\n\nNew Lines:\n{chat_history_str}",
         result=summary_content
     )
     
-    return summary_content
+    return summary_content.strip()
 
 def parse_data_url(data_url: str):
     """
@@ -936,11 +933,10 @@ def chat_coach_stream(
     """
     logger.log_process_start("Smart Coach Agent", "Generating streaming response")
     
-    # Build summarized outline context (only chapter name and session titles)
+    # Build summarized outline context (showing current session indicator)
     outline_context = ""
     if detailed_outline:
         chapters = {}
-        # Keep items sorted by order
         sorted_items = sorted(detailed_outline, key=lambda x: x.get("order", 0))
         for item in sorted_items:
             ch = item.get("chapter") or "سایر"
@@ -951,9 +947,14 @@ def chat_coach_stream(
         for ch_title, sessions in chapters.items():
             outline_context += f"\n- Chapter: {ch_title}\n"
             for s_title in sessions:
-                outline_context += f"  * Session: {s_title}\n"
+                marker = " ◀ [CURRENT SESSION]" if s_title == current_session_title else ""
+                outline_context += f"    * {s_title}{marker}\n"
     else:
-        outline_context = "\n".join([f"- {title}" for title in outline_titles]) if outline_titles else "No outline available."
+        for title in (outline_titles or []):
+            marker = " ◀ [CURRENT SESSION]" if title == current_session_title else ""
+            outline_context += f"- {title}{marker}\n"
+        if not outline_context:
+            outline_context = "No outline available."
         
     # Build course details metadata
     course_details_str = f"""- Title: {course_title}
@@ -967,11 +968,17 @@ def chat_coach_stream(
     if prerequisites:
         course_details_str += f"- Prerequisites:\n" + "\n".join([f"  * {p}" for p in prerequisites]) + "\n"
 
+    # Truncate large session content to avoid context overload & Gemini 503 unavailable spikes
+    content_limit = 5000
+    session_content_str = current_session_content or ""
+    if len(session_content_str) > content_limit:
+        session_content_str = session_content_str[:content_limit] + "\n\n[محتوای جلسه برای حفظ کارایی و عدم مصرف بیش از حد توکن کوتاه شده است...]"
+
     system_prompt = prompts.SMART_COACH_SYSTEM_PROMPT.format(
         course_details_context=course_details_str,
         outline_context=outline_context,
         current_session_title=current_session_title,
-        current_session_content=current_session_content or "No content available yet.",
+        current_session_content=session_content_str,
         chat_summary_context=f"\n[PREVIOUS CONVERSATION SUMMARY]:\n{chat_summary}\n" if chat_summary else "",
         user_info=user_info,
         semantic_memory_context=semantic_memory_context
@@ -995,28 +1002,30 @@ def chat_coach_stream(
         langchain_history = langchain_history[-10:]
         
     # Ensure starting with a UserMessage for Gemini requirements
-    if langchain_history and langchain_history[0].type == "ai":
+    while langchain_history and langchain_history[0].type == "ai":
         langchain_history = langchain_history[1:]
             
     logger.log_process_start("AI Coach Stream", "Handling coach chat interaction")
     start_time = time.time()
     
+    llm = get_coach_llm(api_key, coach_model)
     full_response_content = ""
-    logger.log_ai_stream_start("AI Smart Coach", get_coach_llm(api_key, coach_model).model)
+    logger.log_ai_stream_start("AI Smart Coach", llm.model)
     
     try:
         messages_to_send = [SystemMessage(content=system_prompt)] + langchain_history
-        for chunk in get_coach_llm(api_key, coach_model).stream(messages_to_send):
+        for chunk in llm.stream(messages_to_send):
             content = chunk.content
             if isinstance(content, list):
                 content = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in content])
             
-            full_response_content += content
-            yield content
+            if content:
+                full_response_content += content
+                yield content
             
         logger.log_ai_call(
             step_name="AI Smart Coach (Stream Finished)",
-            model_name=get_coach_llm(api_key, coach_model).model,
+            model_name=llm.model,
             system_prompt=system_prompt,
             user_input=full_conversation_log.strip(),
             result=full_response_content
@@ -1028,8 +1037,8 @@ def chat_coach_stream(
             yield "خطا در اتصال به سرویس هوش مصنوعی. لطفا وضعیت اینترنت یا پروکسی خود را بررسی کنید. 🌐❌"
         else:
             yield f"متأسفانه خطایی رخ داد: {str(e)} ⚠️"
-        
-    logger.log_process_end("AI Coach Stream", time.time() - start_time)
+    finally:
+        logger.log_process_end("AI Coach Stream", time.time() - start_time)
 
 def generate_knowledge_insight(completed_sessions: List[dict], api_key: Optional[str] = None, content_model: Optional[str] = None) -> str:
     """Analyzes historical progress and prints highly engaging educational reflection insights (Farsi)."""

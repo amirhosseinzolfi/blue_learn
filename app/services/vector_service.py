@@ -7,6 +7,8 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.logger import logger
 
+_ollama_available = True
+
 class DynamicFallbackEmbeddings(Embeddings):
     """
     Attempts Ollama embeddings first; falls back to Google GenAI embeddings
@@ -29,32 +31,40 @@ class DynamicFallbackEmbeddings(Embeddings):
         )
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        try:
-            # Attempt Ollama
-            embedder = self._get_ollama()
-            return embedder.embed_documents(texts)
-        except Exception as e:
-            logger.log_error(f"Ollama document embedding failed ({str(e)}). Falling back to Google GenAI...")
+        global _ollama_available
+        if _ollama_available:
             try:
-                embedder = self._get_google()
+                # Attempt Ollama
+                embedder = self._get_ollama()
                 return embedder.embed_documents(texts)
-            except Exception as e_inner:
-                logger.log_error(f"Fallback Google GenAI embedding also failed: {str(e_inner)}")
-                raise e_inner
+            except Exception as e:
+                logger.log_error(f"Ollama document embedding failed ({str(e)}). Falling back to Google GenAI...")
+                _ollama_available = False
+                
+        try:
+            embedder = self._get_google()
+            return embedder.embed_documents(texts)
+        except Exception as e_inner:
+            logger.log_error(f"Fallback Google GenAI embedding also failed: {str(e_inner)}")
+            raise e_inner
 
     def embed_query(self, text: str) -> List[float]:
-        try:
-            # Attempt Ollama
-            embedder = self._get_ollama()
-            return embedder.embed_query(text)
-        except Exception as e:
-            logger.log_error(f"Ollama query embedding failed ({str(e)}). Falling back to Google GenAI...")
+        global _ollama_available
+        if _ollama_available:
             try:
-                embedder = self._get_google()
+                # Attempt Ollama
+                embedder = self._get_ollama()
                 return embedder.embed_query(text)
-            except Exception as e_inner:
-                logger.log_error(f"Fallback Google GenAI embedding also failed: {str(e_inner)}")
-                raise e_inner
+            except Exception as e:
+                logger.log_error(f"Ollama query embedding failed ({str(e)}). Falling back to Google GenAI...")
+                _ollama_available = False
+                
+        try:
+            embedder = self._get_google()
+            return embedder.embed_query(text)
+        except Exception as e_inner:
+            logger.log_error(f"Fallback Google GenAI embedding also failed: {str(e_inner)}")
+            raise e_inner
 
 def get_embeddings_model(google_api_key: Optional[str] = None) -> Embeddings:
     """Returns the unified dynamic fallback embedding model."""

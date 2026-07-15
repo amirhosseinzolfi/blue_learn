@@ -300,7 +300,8 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
     };
 
     const activityData = stats.activity_data || [];
-    const activeDays = activityData.filter(d => d.minutes > 0).length;
+    const firstActiveIdx = activityData.findIndex(d => d.minutes > 0);
+    const activeDays = firstActiveIdx !== -1 ? (activityData.length - firstActiveIdx) : 0;
     const totalMins = activityData.reduce((s, d) => s + d.minutes, 0);
     const avgMins = activeDays > 0 ? Math.round(totalMins / activeDays) : 0;
 
@@ -478,8 +479,10 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                     if (idx < 0) return;
                     const data = activityData[idx];
                     if (!data) return;
-                    const allActive = activityData.filter(d => d.minutes > 0);
-                    const allTimeAvg = allActive.length > 0 ? Math.round(allActive.reduce((s, v) => s + v.minutes, 0) / allActive.length) : 0;
+                    const firstActiveIdx = activityData.findIndex(d => d.minutes > 0);
+                    const activeDays = firstActiveIdx !== -1 ? (activityData.length - firstActiveIdx) : 0;
+                    const totalMins = activityData.reduce((s, d) => s + d.minutes, 0);
+                    const allTimeAvg = activeDays > 0 ? Math.round(totalMins / activeDays) : 0;
                     setChartPopup({ visible: true, data: { ...data, avg_minutes: allTimeAvg }, x: event.clientX, y: event.clientY });
                 },
                 dataPointMouseLeave: () => {
@@ -529,8 +532,15 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
             data: (() => {
                 if (!visibleSeries.average) return [];
                 let sum = 0, count = 0;
+                let started = false;
                 return activityData.map(d => {
-                    if (d.minutes > 0) { sum += d.minutes; count++; }
+                    if (d.minutes > 0) {
+                        started = true;
+                    }
+                    if (started) {
+                        sum += d.minutes;
+                        count++;
+                    }
                     return [new Date(d.date).getTime(), count > 0 ? Math.round(sum / count) : 0];
                 });
             })()
@@ -722,31 +732,12 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                                     </div>
                                 )}
                                 {/* Key Metrics Row */}
-                                <div className="grid grid-cols-3 gap-2">
+                                <div className="grid grid-cols-1 gap-2">
                                     <div className="bg-white/[0.03] border border-white/[0.05] p-3 rounded-2xl text-center">
                                         <p className="text-[9px] text-slate-500 mb-1">سرعت یادگیری</p>
                                         <p className="text-lg font-black text-indigo-400">x{cp.global_learning_velocity?.toFixed(1) || '1.0'}</p>
                                     </div>
-                                    <div className="bg-white/[0.03] border border-white/[0.05] p-3 rounded-2xl text-center">
-                                        <p className="text-[9px] text-slate-500 mb-1">ماندگاری</p>
-                                        <p className="text-lg font-black text-emerald-400">{((cp.retention_index || 0) * 100).toFixed(0)}%</p>
-                                    </div>
-                                    <div className="bg-white/[0.03] border border-white/[0.05] p-3 rounded-2xl text-center">
-                                        <p className="text-[9px] text-slate-500 mb-1">تمرکز</p>
-                                        <p className="text-lg font-black text-blue-400">{cp.attention_span_minutes || 25} دق</p>
-                                    </div>
                                 </div>
-                                {/* Personality Traits */}
-                                {cp.cognitive_data?.personality_traits && (
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {Object.entries(cp.cognitive_data.personality_traits).map(([key, val], i) => (
-                                            <div key={i} className="bg-white/[0.02] border border-white/[0.04] p-2.5 rounded-xl">
-                                                <p className="text-[9px] text-slate-500 mb-0.5">{{ persistence: 'پشتکار', patience_with_errors: 'صبر در خطا', learning_curiosity: 'کنجکاوی', preferred_session_length: 'طول جلسه' }[key] || key}</p>
-                                                <p className="text-xs font-bold text-white">{val}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
                         )}
                     </div>
@@ -922,11 +913,6 @@ function ProgressView({ stats, insights, isInsightLoading, onGenerateInsight, on
                                                         }`} 
                                                         style={{ width: `${selectedNode.mastery_score * 100}%` }} 
                                                     />
-                                                </div>
-                                                
-                                                <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/[0.03] text-[9px] text-slate-500 font-mono">
-                                                    <span>دقت ارزیابی هوش مصنوعی</span>
-                                                    <span className="font-bold text-slate-300">{Math.round(selectedNode.confidence_level * 100)}%</span>
                                                 </div>
                                             </div>
 

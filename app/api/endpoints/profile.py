@@ -107,8 +107,6 @@ def get_stats(
             cp = user_profile.cognitive_profile
             cognitive_profile = {
                 "global_learning_velocity": cp.global_learning_velocity,
-                "attention_span_minutes": cp.attention_span_minutes,
-                "retention_index": cp.retention_index,
                 "cognitive_data": json.loads(cp.cognitive_data_json) if cp.cognitive_data_json else {},
                 "interests": json.loads(cp.interests_json) if cp.interests_json else [],
                 "learning_style_summary": cp.learning_style_summary or "",
@@ -136,7 +134,6 @@ def get_stats(
                 "concept": n.concept,
                 "category": n.category,
                 "mastery_score": n.mastery_score,
-                "confidence_level": n.confidence_level,
                 "prerequisites": prereqs,
                 "difficulty_level": difficulty_level,
                 "key_terms": key_terms

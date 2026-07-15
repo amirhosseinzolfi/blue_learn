@@ -1,5 +1,5 @@
 import json
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -80,6 +80,56 @@ def get_course_chat_history(
     history = db.query(models.CourseChatMessage).filter(models.CourseChatMessage.course_id == course_id).order_by(models.CourseChatMessage.id).all()
     return [{"role": msg.role, "content": msg.content} for msg in history]
 
+def run_post_stream_db_sync(
+    course_id: int,
+    assistant_content: str,
+    captured_api_key: Optional[str],
+    captured_coach_model: Optional[str]
+):
+    """Saves the assistant's response to the DB and handles progressive background history summarization."""
+    db_session = database.SessionLocal()
+    try:
+        course_db = db_session.query(models.Course).filter(models.Course.id == course_id).first()
+        if not course_db:
+            return
+            
+        assistant_msg = models.CourseChatMessage(
+            course_id=course_db.id,
+            role="assistant",
+            content=assistant_content
+        )
+        db_session.add(assistant_msg)
+        db_session.commit()
+
+        # Check if we need to summarize older messages
+        unsummarized_msgs = db_session.query(models.CourseChatMessage).filter(
+            models.CourseChatMessage.course_id == course_db.id,
+            models.CourseChatMessage.is_summarized == False
+        ).order_by(models.CourseChatMessage.id).all()
+        
+        if len(unsummarized_msgs) > 10:
+            msgs_to_summarize = unsummarized_msgs[:-6]
+            messages_dict_to_summarize = [{"role": msg.role, "content": msg.content} for msg in msgs_to_summarize]
+            
+            logger.log_info(f"Triggering background summarization for {len(msgs_to_summarize)} old messages...")
+            new_summary = agent_service.generate_history_summary(
+                messages_dict_to_summarize,
+                course_db.chat_summary,
+                api_key=captured_api_key,
+                coach_model=captured_coach_model
+            )
+            course_db.chat_summary = new_summary
+            
+            for msg in msgs_to_summarize:
+                msg.is_summarized = True
+                
+            db_session.commit()
+            logger.log_success(f"History summarization complete. New summary saved for course {course_db.id}")
+    except Exception as ex:
+        logger.log_error(f"Error during background database sync: {str(ex)}")
+    finally:
+        db_session.close()
+
 @router.post("/chat/coach")
 def chat_coach_endpoint(
     request: CoachChatRequest,
@@ -92,7 +142,7 @@ def chat_coach_endpoint(
     1. Saves user inputs to the database.
     2. Performs semantic retrieval across past event logs using Fallback Embeddings.
     3. Streams response chunks to client continuously.
-    4. Triggers background thread summarization for older messages once streaming concludes.
+    4. Triggers background tasks to save AI replies and summarize old history once stream concludes.
     """
     logger.log_info(f"API Endpoint: /chat/coach hit for course {request.course_id}, item {request.item_id}")
     course = db.query(models.Course).filter(
@@ -126,8 +176,12 @@ def chat_coach_endpoint(
         
     db.commit()
 
-    # Aggregate full conversation histories for LLM context
-    history_msgs = db.query(models.CourseChatMessage).filter(models.CourseChatMessage.course_id == course.id).order_by(models.CourseChatMessage.id).all()
+    # Aggregate sliding window of history for LLM context (fetch only last 12 unsummarized messages)
+    history_msgs = db.query(models.CourseChatMessage).filter(
+        models.CourseChatMessage.course_id == course.id,
+        models.CourseChatMessage.is_summarized == False
+    ).order_by(models.CourseChatMessage.id.desc()).limit(12).all()
+    history_msgs.reverse()
     messages_dict = [{"role": msg.role, "content": msg.content} for msg in history_msgs]
 
     outline_titles = [i.title for i in sorted(course.items, key=lambda x: x.order)]
@@ -216,40 +270,17 @@ def chat_coach_endpoint(
     def stream_wrapper(captured_api_key=user_api_key, captured_coach_model=user_coach_model):
         full_response = ""
         for chunk in generator:
-            full_response += chunk
-            yield chunk
+            if chunk:
+                full_response += chunk
+                yield chunk
             
-        # 1. Save assistant message after streaming completes
-        db_session = database.SessionLocal()
-        try:
-            # We re-fetch items in the fresh connection to prevent cross-thread issues
-            course_db = db_session.query(models.Course).filter(models.Course.id == course.id).first()
-            assistant_msg = models.CourseChatMessage(course_id=course_db.id, role="assistant", content=full_response)
-            db_session.add(assistant_msg)
-            db_session.commit()
-
-            # 2. Trigger history summarization logic if old unsummarized messages count exceeds 10
-            unsummarized_msgs = db_session.query(models.CourseChatMessage).filter(
-                models.CourseChatMessage.course_id == course_db.id,
-                models.CourseChatMessage.is_summarized == False
-            ).order_by(models.CourseChatMessage.id).all()
-            
-            if len(unsummarized_msgs) > 10:
-                msgs_to_summarize = unsummarized_msgs[:-6]
-                messages_dict_to_summarize = [{"role": msg.role, "content": msg.content} for msg in msgs_to_summarize]
-                
-                logger.log_info(f"Triggering background summarization for {len(msgs_to_summarize)} old messages...")
-                new_summary = agent_service.generate_history_summary(messages_dict_to_summarize, course_db.chat_summary, api_key=captured_api_key, coach_model=captured_coach_model)
-                course_db.chat_summary = new_summary
-                
-                for msg in msgs_to_summarize:
-                    msg.is_summarized = True
-                    
-                db_session.commit()
-                logger.log_success(f"History summarization complete. New summary saved for course {course_db.id}")
-        except Exception as ex:
-            logger.log_error(f"Error during stream wrapper database sync: {str(ex)}")
-        finally:
-            db_session.close()
+        # Stream has fully finished. Queue the DB save and summarization to run in the background.
+        background_tasks.add_task(
+            run_post_stream_db_sync,
+            course_id=course.id,
+            assistant_content=full_response,
+            captured_api_key=captured_api_key,
+            captured_coach_model=captured_coach_model
+        )
 
     return StreamingResponse(stream_wrapper(), media_type="text/plain")

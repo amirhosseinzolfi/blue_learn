@@ -69,13 +69,14 @@ def run_profiling_background_task(user_id: int):
         cog_profile = user_profile.cognitive_profile
         logger.log_process_start("Cognitive Profiling Pipeline", "Executing incremental delta-based profiling for the latest learning event")
         
-        # Get the latest single learning event log that triggered this background task
-        latest_event = db.query(models.LearningEventLog).filter(
-            models.LearningEventLog.user_id == user_profile.id
-        ).order_by(models.LearningEventLog.timestamp.desc()).first()
+        # Get all unprofiled learning events for the user
+        unprofiled_events = db.query(models.LearningEventLog).filter(
+            models.LearningEventLog.user_id == user_profile.id,
+            models.LearningEventLog.is_profiled == False
+        ).order_by(models.LearningEventLog.timestamp.asc()).all()
         
-        if not latest_event:
-            logger.log_info("No learning events found. Skipping incremental profiling.")
+        if not unprofiled_events:
+            logger.log_info("No unprofiled learning events found. Skipping incremental profiling.")
             logger.log_process_end("Cognitive Profiling Pipeline", 0)
             return
 
@@ -95,8 +96,6 @@ def run_profiling_background_task(user_id: int):
         
         current_state_str = f"""
         Velocity: {cog_profile.global_learning_velocity}
-        Attention Span: {cog_profile.attention_span_minutes} minutes
-        Retention Index: {cog_profile.retention_index}
         Learning Style Summary: {cog_profile.learning_style_summary or 'None'}
         Personality Summary: {cog_profile.personality_summary or 'None'}
         Key Strengths: {strengths}
@@ -104,14 +103,17 @@ def run_profiling_background_task(user_id: int):
         Recommended Next Topics: {recommended}
         """
 
-        new_event_str = f"""
-        Event Type: {latest_event.event_type}
-        Course Title: {latest_event.course_title or 'N/A'}
-        Session Title: {latest_event.session_title or 'N/A'}
-        Study Duration: {latest_event.study_duration_seconds} seconds
-        Details: {latest_event.raw_interaction_text or 'N/A'}
-        Timestamp: {latest_event.timestamp}
-        """
+        events_info = []
+        for idx, event in enumerate(unprofiled_events, 1):
+            events_info.append(f"""Event #{idx}:
+        Event Type: {event.event_type}
+        Course Title: {event.course_title or 'N/A'}
+        Session Title: {event.session_title or 'N/A'}
+        Study Duration: {event.study_duration_seconds} seconds
+        Details: {event.raw_interaction_text or 'N/A'}
+        Timestamp: {event.timestamp}""")
+        
+        new_event_str = "\n\n".join(events_info)
 
         # Run the LangChain-powered Incremental Cognitive Profiler Agent
         updated_data = agent_service.run_incremental_cognitive_profiler(
@@ -124,34 +126,21 @@ def run_profiling_background_task(user_id: int):
                 logger.log_info("Applying refined cognitive traits updates returned by AI Agent...")
                 if updated_data.global_learning_velocity is not None:
                     cog_profile.global_learning_velocity = updated_data.global_learning_velocity
-                if updated_data.attention_span_minutes is not None:
-                    cog_profile.attention_span_minutes = updated_data.attention_span_minutes
-                if updated_data.retention_index is not None:
-                    cog_profile.retention_index = updated_data.retention_index
                 
                 if updated_data.learning_style_summary_update:
                     cog_profile.learning_style_summary = updated_data.learning_style_summary_update
                 if updated_data.personality_summary_update:
                     cog_profile.personality_summary = updated_data.personality_summary_update
                 
-                # Append lists avoiding duplicates
-                if updated_data.new_strength_areas:
-                    for s in updated_data.new_strength_areas:
-                        if s not in strengths:
-                            strengths.append(s)
-                    cog_profile.strength_areas_json = json.dumps(strengths, ensure_ascii=False)
+                # Overwrite lists with complete updated consolidated lists
+                if updated_data.strength_areas is not None:
+                    cog_profile.strength_areas_json = json.dumps(updated_data.strength_areas, ensure_ascii=False)
                 
-                if updated_data.new_interests:
-                    for i in updated_data.new_interests:
-                        if i not in interests:
-                            interests.append(i)
-                    cog_profile.interests_json = json.dumps(interests, ensure_ascii=False)
+                if updated_data.interests is not None:
+                    cog_profile.interests_json = json.dumps(updated_data.interests, ensure_ascii=False)
                 
-                if updated_data.new_recommended_topics:
-                    for r in updated_data.new_recommended_topics:
-                        if r not in recommended:
-                            recommended.append(r)
-                    cog_profile.recommended_topics_json = json.dumps(recommended, ensure_ascii=False)
+                if updated_data.recommended_topics is not None:
+                    cog_profile.recommended_topics_json = json.dumps(updated_data.recommended_topics, ensure_ascii=False)
             
             # 2. Add or Refine concept masteries and prerequisites inside our knowledge graph
             logger.log_info(f"AI Profiler returned {len(updated_data.updated_knowledge_nodes)} incremental concept changes.")
@@ -172,7 +161,6 @@ def run_profiling_background_task(user_id: int):
                             concept=kn_update.concept,
                             category=kn_update.category,
                             mastery_score=min(0.98, max(0.0, kn_update.mastery_score_delta)),
-                            confidence_level=kn_update.confidence_score,
                             dependencies_json=json.dumps({
                                 "prerequisites": prereqs,
                                 "difficulty_level": diff_lvl,
@@ -184,7 +172,6 @@ def run_profiling_background_task(user_id: int):
                 elif kn_update.action == "refine":
                     old_score = node.mastery_score
                     node.mastery_score = min(0.98, node.mastery_score + kn_update.mastery_score_delta)
-                    node.confidence_level = kn_update.confidence_score
                     
                     existing_prereqs = []
                     existing_terms = []
@@ -208,8 +195,11 @@ def run_profiling_background_task(user_id: int):
                     }, ensure_ascii=False)
                     logger.log_success(f"Incremental Profiler: Refined concept '{kn_update.concept}' mastery: {old_score*100:.1f}% -> {node.mastery_score*100:.1f}%")
             
+            # Mark processed events as profiled
+            for event in unprofiled_events:
+                event.is_profiled = True
             db.commit()
-            logger.log_success("All incremental cognitive states and knowledge graphs updated successfully!")
+            logger.log_success(f"All {len(unprofiled_events)} incremental events marked as profiled and cognitive states updated successfully!")
         else:
             logger.log_error("Profiler returned None. AI failed to return valid incremental schema.")
         logger.log_process_end("Cognitive Profiling Pipeline", 0)
@@ -269,8 +259,14 @@ def rebuild_user_cognitive_profile(db: Session, user_id: int) -> dict:
 
         # 4. Clear old knowledge nodes to prevent historical drift on rebuild
         deleted = db.query(models.KnowledgeNode).filter(models.KnowledgeNode.user_id == user_profile.id).delete()
+        
+        # Mark all existing event logs for this user as profiled
+        db.query(models.LearningEventLog).filter(
+            models.LearningEventLog.user_id == user_profile.id
+        ).update({models.LearningEventLog.is_profiled: True})
+        
         db.commit()
-        logger.log_info(f"Cleared {deleted} old knowledge nodes for fresh rebuild.")
+        logger.log_info(f"Cleared {deleted} old knowledge nodes and marked all existing event logs as profiled.")
 
         # 5. Gather ALL historical learning data for the user
         all_courses = db.query(models.Course).filter(models.Course.user_id == user_id).all()
@@ -378,8 +374,6 @@ def rebuild_user_cognitive_profile(db: Session, user_id: int) -> dict:
 
         # 7. Write new traits updates
         cog_profile.global_learning_velocity = updated_data.global_learning_velocity
-        cog_profile.attention_span_minutes = updated_data.attention_span_minutes
-        cog_profile.retention_index = updated_data.retention_index
         
         cognitive_data_dict = {
             "learning_style": {
@@ -387,16 +381,10 @@ def rebuild_user_cognitive_profile(db: Session, user_id: int) -> dict:
                 "visual": updated_data.ls_visual,
                 "theoretical": updated_data.ls_theoretical,
                 "self_directed": updated_data.ls_self_directed
-            },
-            "personality_traits": {
-                "persistence": updated_data.pt_persistence,
-                "patience_with_errors": updated_data.pt_patience,
-                "learning_curiosity": updated_data.pt_curiosity,
-                "preferred_session_length": updated_data.pt_session_length
             }
         }
         cog_profile.cognitive_data_json = json.dumps(cognitive_data_dict, ensure_ascii=False)
-        cog_profile.interests_json = json.dumps(updated_data.new_interests, ensure_ascii=False)
+        cog_profile.interests_json = json.dumps(updated_data.interests, ensure_ascii=False)
         cog_profile.learning_style_summary = updated_data.learning_style_summary
         cog_profile.personality_summary = updated_data.personality_summary
         cog_profile.strength_areas_json = json.dumps(updated_data.strength_areas, ensure_ascii=False)
@@ -411,7 +399,6 @@ def rebuild_user_cognitive_profile(db: Session, user_id: int) -> dict:
                 concept=kn.concept,
                 category=kn.category,
                 mastery_score=min(0.98, max(0.0, kn.mastery_score_delta)),
-                confidence_level=kn.confidence_score,
                 dependencies_json=json.dumps({
                     "prerequisites": kn.prerequisites or [],
                     "difficulty_level": kn.difficulty_level or "مقدماتی",
@@ -430,3 +417,60 @@ def rebuild_user_cognitive_profile(db: Session, user_id: int) -> dict:
         logger.log_error(f"Manual rebuild failed for user {user_id}: {str(e)}")
         db.rollback()
         raise e
+
+async def nightly_profile_updater():
+    """
+    Asynchronous background scheduler that wakes up at 00:00 Asia/Tehran time
+    every day to update profiles for users who have unprofiled learning logs.
+    """
+    import asyncio
+    import datetime
+    try:
+        import zoneinfo
+    except ImportError:
+        from backports import zoneinfo  # Fallback for old python versions if any, though python 3.9+ has it.
+        
+    tehran_tz = zoneinfo.ZoneInfo("Asia/Tehran")
+    logger.log_info("Nightly profile updater background scheduler started.")
+    
+    while True:
+        try:
+            now = datetime.datetime.now(tehran_tz)
+            # Calculate duration to next 00:00 (end of day) in Tehran TZ
+            tomorrow = now + datetime.timedelta(days=1)
+            next_run = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0, tzinfo=tehran_tz)
+            sleep_seconds = (next_run - now).total_seconds()
+            
+            logger.log_info(f"Nightly updater scheduled: sleeping for {sleep_seconds:.1f} seconds until 00:00 Tehran time.")
+            await asyncio.sleep(sleep_seconds)
+            
+            # Woken up! Run profiling for all users with unprofiled events
+            logger.log_info("Nightly updater: Waking up to process unprofiled learning event logs...")
+            db = database.SessionLocal()
+            try:
+                # Find all user IDs with unprofiled logs
+                unprofiled_users = db.query(models.LearningEventLog.user_id).filter(
+                    models.LearningEventLog.is_profiled == False
+                ).distinct().all()
+                
+                if unprofiled_users:
+                    logger.log_info(f"Nightly updater: Found {len(unprofiled_users)} users with unprofiled events. Starting updates...")
+                    for (user_profile_id,) in unprofiled_users:
+                        # Map user_profile_id back to user_id
+                        prof = db.query(models.UserProfile).filter(models.UserProfile.id == user_profile_id).first()
+                        if prof:
+                            logger.log_info(f"Nightly updater: Triggering incremental profiling for user_id {prof.user_id}...")
+                            try:
+                                run_profiling_background_task(prof.user_id)
+                            except Exception as run_ex:
+                                logger.log_error(f"Nightly updater: Profiling failed for user_id {prof.user_id}: {str(run_ex)}")
+                else:
+                    logger.log_info("Nightly updater: No unprofiled events found.")
+            except Exception as db_ex:
+                logger.log_error(f"Nightly updater database error: {str(db_ex)}")
+            finally:
+                db.close()
+                
+        except Exception as loop_ex:
+            logger.log_error(f"Nightly updater loop error: {str(loop_ex)}")
+            await asyncio.sleep(60)  # Sleep 1 minute before retrying on general errors to avoid tight looping
