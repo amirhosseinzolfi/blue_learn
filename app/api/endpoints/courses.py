@@ -416,8 +416,17 @@ def generate_random_micro(
         user_info = f"Name: {user_settings.name or 'N/A'}\nAge: {user_settings.age or 'N/A'}\nEducation: {user_settings.education or 'N/A'}\nExperience: {user_settings.background_experience or 'N/A'}\nAdditional Info: {user_settings.additional_info or 'N/A'}"
 
     # Generate content using dynamic agent service
+    try:
+        selected_lo = json.loads(selected_item.learning_objectives) if selected_item.learning_objectives else []
+    except Exception:
+        selected_lo = []
+    try:
+        selected_kc = json.loads(selected_item.key_concepts) if selected_item.key_concepts else []
+    except Exception:
+        selected_kc = []
+
     content = agent_service.get_content(
-        subject=course.title, 
+        subject=course.title,
         item_title=selected_item.title,
         course_description=course.description,
         full_outline=full_outline,
@@ -427,7 +436,10 @@ def generate_random_micro(
         learning_outcomes=learning_outcomes,
         prerequisites=prerequisites,
         target_user=course.target_user_summary,
-        detailed_outline=detailed_outline
+        detailed_outline=detailed_outline,
+        session_description=selected_item.description,
+        session_learning_objectives=selected_lo,
+        session_key_concepts=selected_kc
     )
 
     if generate_cover:

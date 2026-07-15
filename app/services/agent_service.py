@@ -99,13 +99,16 @@ def get_content(
     learning_outcomes: Optional[List[str]] = None,
     prerequisites: Optional[List[str]] = None,
     target_user: Optional[str] = None,
-    detailed_outline: Optional[List[dict]] = None
+    detailed_outline: Optional[List[dict]] = None,
+    session_description: Optional[str] = None,
+    session_learning_objectives: Optional[List[str]] = None,
+    session_key_concepts: Optional[List[str]] = None
 ) -> str:
     """
     Writes comprehensive, rich Markdown text for an individual syllabus session.
     Provides detailed context to ensure consistency.
     """
-    # 1. Build detailed outline string
+    # 1. Build compact outline: chapter titles + session titles only (no per-session details)
     detailed_outline_str = ""
     if detailed_outline:
         chapters = {}
@@ -114,17 +117,13 @@ def get_content(
             if ch not in chapters:
                 chapters[ch] = []
             chapters[ch].append(item)
-            
+
         for ch_title, ch_items in chapters.items():
             detailed_outline_str += f"\n- Chapter: {ch_title}\n"
             for item in ch_items:
-                detailed_outline_str += f"  * Session: {item.get('title')}\n"
-                if item.get("description"):
-                    detailed_outline_str += f"    Description: {item.get('description')}\n"
-                if item.get("learning_objectives"):
-                    detailed_outline_str += f"    Learning Objectives: {', '.join(item.get('learning_objectives'))}\n"
-                if item.get("key_concepts"):
-                    detailed_outline_str += f"    Key Concepts: {', '.join(item.get('key_concepts'))}\n"
+                title = item.get("title", "")
+                marker = " ◀ [CURRENT SESSION]" if title == item_title else ""
+                detailed_outline_str += f"  * {title}{marker}\n"
     else:
         detailed_outline_str = "\n".join([f"- {t}" for t in (full_outline or [])]) if full_outline else "Not provided"
 
@@ -146,14 +145,17 @@ def get_content(
     user_prompt_template = """Please write the full session content now.
 
 Session Details:
-- this session Title: {item_title}
+- Title: {item_title}
+- Description: {session_description}
+- Learning Objectives: {session_learning_objectives}
+- Key Concepts: {session_key_concepts}
 
 {course_details_str}
 
 Course Context/Description:
 {course_desc}
 
-Course Outline:
+Course Outline (titles only for context):
 {outline_context}
 """
 
@@ -166,6 +168,9 @@ Course Outline:
     
     invoke_args = {
         "item_title": item_title,
+        "session_description": session_description or "Not provided",
+        "session_learning_objectives": ", ".join(session_learning_objectives) if session_learning_objectives else "Not provided",
+        "session_key_concepts": ", ".join(session_key_concepts) if session_key_concepts else "Not provided",
         "course_details_str": course_details_str,
         "course_desc": course_description,
         "outline_context": detailed_outline_str,
@@ -178,12 +183,29 @@ Course Outline:
     # Handle list part format edge cases returned by the model
     if isinstance(content, list):
         content = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in content])
-        
+
+    rendered_system_prompt = prompts.CONTENT_GENERATOR_PROMPT.format(
+        user_info=user_info or "Not provided"
+    )
+    rendered_user_prompt = user_prompt_template.format(**invoke_args)
+    variables_block = (
+        f"[TEMPLATE VARIABLES]\n"
+        f"  item_title       : {item_title}\n"
+        f"  subject (course) : {subject}\n"
+        f"  course_level     : {course_level or 'Not specified'}\n"
+        f"  course_goal      : {course_goal or 'Not specified'}\n"
+        f"  target_user      : {target_user or 'Not specified'}\n"
+        f"  course_desc      : {course_description or 'Not provided'}\n"
+        f"  user_info        : {user_info or 'Not provided'}\n"
+        f"  learning_outcomes: {learning_outcomes or []}\n"
+        f"  prerequisites    : {prerequisites or []}\n"
+        f"\n[RENDERED USER PROMPT]\n{rendered_user_prompt}"
+    )
     logger.log_ai_call(
         step_name="Lesson Content Generation",
         model_name=get_content_llm().model,
-        system_prompt=prompts.CONTENT_GENERATOR_PROMPT,
-        user_input=user_prompt_template.format(**invoke_args),
+        system_prompt=rendered_system_prompt,
+        user_input=variables_block,
         result=content
     )
     

@@ -6,7 +6,13 @@ from fastapi.responses import FileResponse
 
 from app.database import engine, Base, run_migrations
 from app.api.router import api_router
-from app.logger import logger
+from app.logger import logger, _file_handler
+
+# Attach the rotating file handler to uvicorn's loggers so server
+# access/error logs also land in logs/blue_learn.log
+import logging
+for _uv_logger in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+    logging.getLogger(_uv_logger).addHandler(_file_handler)
 
 # Initialize database migrations and schema checks prior to app booting
 run_migrations()

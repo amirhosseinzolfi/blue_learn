@@ -157,8 +157,17 @@ def generate_specific_micro(
     if user_settings:
         user_info = f"Name: {user_settings.name or 'N/A'}\nAge: {user_settings.age or 'N/A'}\nEducation: {user_settings.education or 'N/A'}\nExperience: {user_settings.background_experience or 'N/A'}\nAdditional Info: {user_settings.additional_info or 'N/A'}"
 
+    try:
+        item_lo = json.loads(item.learning_objectives) if item.learning_objectives else []
+    except Exception:
+        item_lo = []
+    try:
+        item_kc = json.loads(item.key_concepts) if item.key_concepts else []
+    except Exception:
+        item_kc = []
+
     content = agent_service.get_content(
-        subject=course.title, 
+        subject=course.title,
         item_title=item.title,
         course_description=course.description,
         full_outline=full_outline,
@@ -168,7 +177,10 @@ def generate_specific_micro(
         learning_outcomes=learning_outcomes,
         prerequisites=prerequisites,
         target_user=course.target_user_summary,
-        detailed_outline=detailed_outline
+        detailed_outline=detailed_outline,
+        session_description=item.description,
+        session_learning_objectives=item_lo,
+        session_key_concepts=item_kc
     )
 
     if generate_cover:
