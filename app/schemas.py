@@ -109,11 +109,17 @@ class IncrementalProfilerUpdateSchema(BaseModel):
 
 class SettingsSchema(BaseModel):
     """API payload for updating local client settings."""
+    # API keys
     google_api_key: Optional[str] = None
-    model_name: Optional[str] = None
-    google_image_api_key: Optional[str] = None
-    image_model_name: Optional[str] = None
-    auto_generate_session_covers: Optional[bool] = None
+    image_api_key: Optional[str] = None
+    # Per-user model names
+    content_model: Optional[str] = None
+    coach_model: Optional[str] = None
+    knowledge_model: Optional[str] = None
+    image_model: Optional[str] = None
+    # Feature flags
+    auto_generate_covers: Optional[bool] = None
+    # Profile fields
     name: Optional[str] = None
     age: Optional[str] = None
     education: Optional[str] = None

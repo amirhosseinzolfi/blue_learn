@@ -141,7 +141,6 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
         name=full_name_clean,
         age=age_clean,
         education=job_edu_clean,
-        gemini_model="gemini-flash-latest"
     )
     db.add(settings_obj)
     

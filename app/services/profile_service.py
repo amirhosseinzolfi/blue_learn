@@ -22,6 +22,10 @@ def run_profiling_background_task(user_id: int):
             db.add(user_profile)
             db.commit()
             db.refresh(user_profile)
+
+        _us = db.query(models.UserSettings).filter(models.UserSettings.user_id == user_id).first()
+        user_api_key = _us.gemini_api_key if _us else None
+        user_knowledge_model = _us.knowledge_model if _us else None
             
         if not user_profile.cognitive_profile:
             logger.log_info("No CognitiveProfile found. Creating default empty profile...")
@@ -38,7 +42,7 @@ def run_profiling_background_task(user_id: int):
         ).all()
         if unembedded_logs:
             logger.log_info(f"Found {len(unembedded_logs)} un-embedded logs. Extracting embeddings...")
-            embedder = vector_service.get_embeddings_model()
+            embedder = vector_service.get_embeddings_model(google_api_key=user_api_key)
             for log in unembedded_logs:
                 text_to_embed = f"Event: {log.event_type} | Course: {log.course_title} | Session: {log.session_title} | Duration: {log.study_duration_seconds}s | Details: {log.raw_interaction_text or ''}"
                 try:
@@ -111,7 +115,7 @@ def run_profiling_background_task(user_id: int):
 
         # Run the LangChain-powered Incremental Cognitive Profiler Agent
         updated_data = agent_service.run_incremental_cognitive_profiler(
-            profile_str, current_state_str, existing_nodes_str, new_event_str
+            profile_str, current_state_str, existing_nodes_str, new_event_str, api_key=user_api_key, knowledge_model=user_knowledge_model
         )
         
         if updated_data:
@@ -363,7 +367,10 @@ def rebuild_user_cognitive_profile(db: Session, user_id: int) -> dict:
         logger.log_info("=" * 70)
 
         # 6. Execute AI cognitive analysis
-        updated_data = agent_service.run_cognitive_profiler(profile_str, current_state_str, super_history_str)
+        _us2 = db.query(models.UserSettings).filter(models.UserSettings.user_id == user_id).first()
+        _rebuild_api_key = _us2.gemini_api_key if _us2 else None
+        _rebuild_knowledge_model = _us2.knowledge_model if _us2 else None
+        updated_data = agent_service.run_cognitive_profiler(profile_str, current_state_str, super_history_str, api_key=_rebuild_api_key, knowledge_model=_rebuild_knowledge_model)
 
         if not updated_data:
             logger.log_error("Profiler returned None. AI Rebuild Failed.")

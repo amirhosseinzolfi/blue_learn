@@ -249,9 +249,29 @@ def run_migrations():
                     background_experience TEXT,
                     additional_info TEXT,
                     gemini_api_key VARCHAR(255),
-                    gemini_model VARCHAR(255)
+                    image_api_key VARCHAR(255),
+                    content_model VARCHAR(255),
+                    coach_model VARCHAR(255),
+                    knowledge_model VARCHAR(255),
+                    image_model VARCHAR(255),
+                    auto_generate_covers BOOLEAN DEFAULT 0
                 )
             """))
+
+            # Add new per-user model columns to existing user_settings rows
+            for col_name, col_def in [
+                ("image_api_key",        "VARCHAR(255)"),
+                ("content_model",        "VARCHAR(255)"),
+                ("coach_model",          "VARCHAR(255)"),
+                ("knowledge_model",      "VARCHAR(255)"),
+                ("image_model",          "VARCHAR(255)"),
+                ("auto_generate_covers", "BOOLEAN DEFAULT 0"),
+            ]:
+                try:
+                    conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col_name} {col_def}"))
+                    conn.commit()
+                except Exception:
+                    pass
 
             # Add user_id column dynamically to user-specific tables if they do not exist
             for table in ["user_profiles", "user_settings", "courses", "daily_activity", "knowledge_insights"]:

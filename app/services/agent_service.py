@@ -1,9 +1,7 @@
-import os
 import time
 import math
 import json
 from typing import List, Optional, Generator, Dict, Any, TypedDict
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -26,31 +24,51 @@ from app.schemas import (
 # 1. LLM ENGINE INSTANTIATIONS
 # ==========================================
 
-def get_generator_llm() -> ChatGoogleGenerativeAI:
-    """Instantiates a dedicated LLM for course curriculum outlining (creative)."""
-    load_dotenv(override=True)
-    return ChatGoogleGenerativeAI(
-        model=os.getenv("GENERATOR_MODEL_NAME", "gemini-flash-latest"),
-        google_api_key=os.getenv("GOOGLE_API_KEY"),
-        temperature=0.75,
-    )
+DEFAULT_CONTENT_MODEL   = "gemini-flash-latest"
+DEFAULT_COACH_MODEL     = "gemini-flash-latest"
+DEFAULT_KNOWLEDGE_MODEL = "gemini-flash-lite-latest"
 
-def get_content_llm() -> ChatGoogleGenerativeAI:
-    """Instantiates a dedicated LLM for session/lesson content writing."""
-    load_dotenv(override=True)
+def _resolve_api_key(user_api_key: Optional[str] = None) -> str:
+    """Returns the user's API key. Raises if not set."""
+    if user_api_key and user_api_key.strip():
+        return user_api_key.strip()
+    raise ValueError("Gemini API key is not set. Please add your API key in Settings.")
+
+def _resolve_model(user_model: Optional[str], default: str) -> str:
+    """Returns user model if set, otherwise the given default."""
+    return user_model.strip() if user_model and user_model.strip() else default
+
+def get_content_llm(api_key: Optional[str] = None, model: Optional[str] = None) -> ChatGoogleGenerativeAI:
+    """LLM for course content generation."""
     return ChatGoogleGenerativeAI(
-        model=os.getenv("MAIN_MODEL_NAME", "gemini-flash-latest"),
-        google_api_key=os.getenv("GOOGLE_API_KEY"),
+        model=_resolve_model(model, DEFAULT_CONTENT_MODEL),
+        google_api_key=_resolve_api_key(api_key),
         temperature=0.7,
     )
 
-def get_coach_llm() -> ChatGoogleGenerativeAI:
-    """Instantiates a dedicated, low-temperature LLM for the conversational coach."""
-    load_dotenv(override=True)
+def get_coach_llm(api_key: Optional[str] = None, model: Optional[str] = None) -> ChatGoogleGenerativeAI:
+    """LLM for session coach and course generator coach."""
     return ChatGoogleGenerativeAI(
-        model=os.getenv("COACH_MODEL_NAME", "gemini-flash-lite-latest"),
-        google_api_key=os.getenv("GOOGLE_API_KEY"),
+        model=_resolve_model(model, DEFAULT_COACH_MODEL),
+        google_api_key=_resolve_api_key(api_key),
         temperature=0.5,
+    )
+
+def get_knowledge_llm(api_key: Optional[str] = None, model: Optional[str] = None) -> ChatGoogleGenerativeAI:
+    """LLM for knowledge base / cognitive profiler updates."""
+    return ChatGoogleGenerativeAI(
+        model=_resolve_model(model, DEFAULT_KNOWLEDGE_MODEL),
+        google_api_key=_resolve_api_key(api_key),
+        temperature=0.4,
+    )
+
+# Alias: course outline generation uses content_llm (same model)
+def get_generator_llm(api_key: Optional[str] = None, model: Optional[str] = None) -> ChatGoogleGenerativeAI:
+    """LLM for course outline generation (alias of content_llm with higher temperature)."""
+    return ChatGoogleGenerativeAI(
+        model=_resolve_model(model, DEFAULT_CONTENT_MODEL),
+        google_api_key=_resolve_api_key(api_key),
+        temperature=0.75,
     )
 
 
@@ -58,7 +76,7 @@ def get_coach_llm() -> ChatGoogleGenerativeAI:
 # 2. CORE ONE-SHOT GENERATIONS
 # ==========================================
 
-def get_outline(subject: str) -> List[OutlineChapterSchema]:
+def get_outline(subject: str, api_key: Optional[str] = None, content_model: Optional[str] = None) -> List[OutlineChapterSchema]:
     """
     Generates a detailed chapter-by-chapter outline for a given subject.
     Utilizes Pydantic structured output parsing.
@@ -72,12 +90,12 @@ def get_outline(subject: str) -> List[OutlineChapterSchema]:
     ])
     
     # Standard LangChain chain composition using the pipe operator
-    chain = prompt_template | get_content_llm().with_structured_output(CourseOutlineSchema, method="json_schema")
+    chain = prompt_template | get_content_llm(api_key, content_model).with_structured_output(CourseOutlineSchema, method="json_schema")
     result = chain.invoke({"subject": subject})
     
     logger.log_ai_call(
         step_name="Outline Generation Node",
-        model_name=get_content_llm().model,
+        model_name=get_content_llm(api_key, content_model).model,
         system_prompt=prompts.OUTLINE_GENERATOR_PROMPT,
         user_input=f"Subject: {subject}\nRequest: Please generate the course outline now.",
         result=result.model_dump_json(indent=2)
@@ -102,7 +120,9 @@ def get_content(
     detailed_outline: Optional[List[dict]] = None,
     session_description: Optional[str] = None,
     session_learning_objectives: Optional[List[str]] = None,
-    session_key_concepts: Optional[List[str]] = None
+    session_key_concepts: Optional[List[str]] = None,
+    api_key: Optional[str] = None,
+    content_model: Optional[str] = None
 ) -> str:
     """
     Writes comprehensive, rich Markdown text for an individual syllabus session.
@@ -164,7 +184,7 @@ Course Outline (titles only for context):
         ("human", user_prompt_template),
     ])
     
-    chain = prompt_template | get_content_llm()
+    chain = prompt_template | get_content_llm(api_key, content_model)
     
     invoke_args = {
         "item_title": item_title,
@@ -203,7 +223,7 @@ Course Outline (titles only for context):
     )
     logger.log_ai_call(
         step_name="Lesson Content Generation",
-        model_name=get_content_llm().model,
+        model_name=get_content_llm(api_key, content_model).model,
         system_prompt=rendered_system_prompt,
         user_input=variables_block,
         result=content
@@ -217,7 +237,7 @@ Course Outline (titles only for context):
 # 3. CHAT & AGENT FLOWS
 # ==========================================
 
-def generate_history_summary(messages: List[dict], current_summary: str = None) -> str:
+def generate_history_summary(messages: List[dict], current_summary: str = None, api_key: Optional[str] = None, coach_model: Optional[str] = None) -> str:
     """Progressively condenses conversation logs into short summary blocks to conserve tokens."""
     if not messages:
         return current_summary or ""
@@ -232,7 +252,7 @@ def generate_history_summary(messages: List[dict], current_summary: str = None) 
         ("user", "Current summary:\n{current_summary}\n\nNew lines of conversation:\n{new_lines}\n\nNew summary:")
     ])
     
-    chain = prompt | get_generator_llm()
+    chain = prompt | get_coach_llm(api_key, coach_model)
     res = chain.invoke({
         "current_summary": current_summary or "No summary yet.",
         "new_lines": chat_history_str
@@ -244,7 +264,7 @@ def generate_history_summary(messages: List[dict], current_summary: str = None) 
     
     logger.log_ai_call(
         step_name="Background History Summarization",
-        model_name=get_generator_llm().model,
+        model_name=get_coach_llm(api_key, coach_model).model,
         system_prompt="Progressively summarize the lines of conversation provided...",
         user_input=f"Previous Summary:\n{current_summary or 'None'}\n\nNew Lines:\n{chat_history_str}",
         result=summary_content
@@ -363,6 +383,9 @@ class CoachState(TypedDict, total=False):
     selected_level: str
     selected_duration: str
     selected_learning_style: str
+    api_key: str
+    content_model: str
+    coach_model: str
 
 
 def merge_profile(profile: dict, patch: ProfilePatch) -> dict:
@@ -486,6 +509,8 @@ def add_user_message_node(state: CoachState) -> CoachState:
 def coach_turn_node(state: CoachState) -> CoachState:
     logger.log_info("Node: coach_turn | Running diagnostic coach step")
     prompt = build_coach_prompt(state)
+    api_key = state.get("api_key")
+    coach_model = state.get("coach_model")
     
     recent_messages = state.get("recent_messages", [])
     history_messages = recent_messages[:-1] if (recent_messages and recent_messages[-1]["role"] == "user") else recent_messages
@@ -508,7 +533,7 @@ def coach_turn_node(state: CoachState) -> CoachState:
     ])
     
     try:
-        structured_llm = get_coach_llm().with_structured_output(CoachDecision, method="json_schema")
+        structured_llm = get_coach_llm(api_key, coach_model).with_structured_output(CoachDecision, method="json_schema")
         chain = prompt_template | structured_llm
         
         user_message = state.get("user_message")
@@ -520,7 +545,7 @@ def coach_turn_node(state: CoachState) -> CoachState:
         
         logger.log_ai_call(
             step_name="Coach Turn Node",
-            model_name=get_coach_llm().model,
+            model_name=get_coach_llm(api_key, coach_model).model,
             system_prompt=prompt,
             user_input=f"--- Message History ---\n{history_log_str}\n--- Latest User Message ---\n{user_message}",
             result=decision.model_dump_json(indent=2)
@@ -550,6 +575,8 @@ def generate_course_outline_node(state: CoachState) -> CoachState:
     profile = state.get("profile", {})
     conversation_summary = state.get("conversation_summary", "")
     user_info = state.get("user_info", "Not provided")
+    api_key = state.get("api_key")
+    content_model = state.get("content_model")
     
     if not profile or not profile.get("course_topic"):
         logger.log_error("Outline Generation Blocked: Missing full profile patch!")
@@ -565,12 +592,12 @@ def generate_course_outline_node(state: CoachState) -> CoachState:
     )
     
     try:
-        structured_llm = get_generator_llm().with_structured_output(CourseGenerationSchema, method="json_schema")
+        structured_llm = get_content_llm(api_key, content_model).with_structured_output(CourseGenerationSchema, method="json_schema")
         course_outline = structured_llm.invoke(prompt)
         
         logger.log_ai_call(
             step_name="Generate Course Outline Node",
-            model_name=get_generator_llm().model,
+            model_name=get_content_llm(api_key, content_model).model,
             system_prompt=prompts.COURSE_OUTLINE_PROMPT,
             user_input=f"Profile Details JSON:\n{json.dumps(profile, ensure_ascii=False, indent=2)}\n\nConversation Summary:\n{conversation_summary}\n\nUser Profile Info:\n{user_info}",
             result=course_outline.model_dump_json(indent=2)
@@ -619,6 +646,8 @@ def summarize_history_node(state: CoachState) -> CoachState:
     logger.log_info("Node: summarize_history | Condensing older conversation history")
     messages = state.get("recent_messages", [])
     old_summary = state.get("conversation_summary", "")
+    api_key = state.get("api_key")
+    coach_model = state.get("coach_model")
     
     keep_messages_count = 6
     if len(messages) <= keep_messages_count:
@@ -633,7 +662,7 @@ def summarize_history_node(state: CoachState) -> CoachState:
     )
     
     try:
-        res = get_generator_llm().invoke(prompt)
+        res = get_coach_llm(api_key, coach_model).invoke(prompt)
         summary_text = res.content
         if isinstance(summary_text, list):
             summary_text = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in summary_text])
@@ -712,7 +741,10 @@ def chat_course_generator(
     duration_sessions: Optional[int] = None,
     learning_style: Optional[str] = None,
     conversation_summary: Optional[str] = None,
-    profile: Optional[dict] = None
+    profile: Optional[dict] = None,
+    api_key: Optional[str] = None,
+    content_model: Optional[str] = None,
+    coach_model: Optional[str] = None
 ) -> ChatAgentResponse:
     """
     Guides the user through dynamic, diagnostic chat turns to refine course outlines.
@@ -816,7 +848,10 @@ def chat_course_generator(
         "user_info": user_info,
         "selected_level": pref_level,
         "selected_duration": pref_duration,
-        "selected_learning_style": pref_learning_style
+        "selected_learning_style": pref_learning_style,
+        "api_key": api_key or "",
+        "content_model": content_model or "",
+        "coach_model": coach_model or ""
     }
     
     # Format the accumulated profile as a nice string or dict list
@@ -891,7 +926,9 @@ def chat_coach_stream(
     course_goal: Optional[str] = None,
     learning_outcomes: Optional[List[str]] = None,
     prerequisites: Optional[List[str]] = None,
-    target_user: Optional[str] = None
+    target_user: Optional[str] = None,
+    api_key: Optional[str] = None,
+    coach_model: Optional[str] = None
 ) -> Generator[str, None, None]:
     """
     Initiates a streaming chat coach conversation.
@@ -965,11 +1002,11 @@ def chat_coach_stream(
     start_time = time.time()
     
     full_response_content = ""
-    logger.log_ai_stream_start("AI Smart Coach", get_coach_llm().model)
+    logger.log_ai_stream_start("AI Smart Coach", get_coach_llm(api_key, coach_model).model)
     
     try:
         messages_to_send = [SystemMessage(content=system_prompt)] + langchain_history
-        for chunk in get_coach_llm().stream(messages_to_send):
+        for chunk in get_coach_llm(api_key, coach_model).stream(messages_to_send):
             content = chunk.content
             if isinstance(content, list):
                 content = "".join([c["text"] if isinstance(c, dict) and "text" in c else str(c) for c in content])
@@ -979,7 +1016,7 @@ def chat_coach_stream(
             
         logger.log_ai_call(
             step_name="AI Smart Coach (Stream Finished)",
-            model_name=get_coach_llm().model,
+            model_name=get_coach_llm(api_key, coach_model).model,
             system_prompt=system_prompt,
             user_input=full_conversation_log.strip(),
             result=full_response_content
@@ -994,7 +1031,7 @@ def chat_coach_stream(
         
     logger.log_process_end("AI Coach Stream", time.time() - start_time)
 
-def generate_knowledge_insight(completed_sessions: List[dict]) -> str:
+def generate_knowledge_insight(completed_sessions: List[dict], api_key: Optional[str] = None, content_model: Optional[str] = None) -> str:
     """Analyzes historical progress and prints highly engaging educational reflection insights (Farsi)."""
     if not completed_sessions:
         return "You haven't completed any sessions yet. Start your learning journey to see your insights here! 🚀"
@@ -1009,7 +1046,7 @@ def generate_knowledge_insight(completed_sessions: List[dict]) -> str:
         ("human", "Please analyze my progress and give me my knowledge insight."),
     ])
 
-    chain = prompt_template | get_content_llm()
+    chain = prompt_template | get_content_llm(api_key, content_model)
     result = chain.invoke({"completed_sessions_info": sessions_info})
 
     content = result.content
@@ -1019,7 +1056,7 @@ def generate_knowledge_insight(completed_sessions: List[dict]) -> str:
     logger.log_process_end("Knowledge Insight Generation", time.time() - start_time)
     return content
 
-def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: str) -> Optional[ProfilerUpdateSchema]:
+def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: str, api_key: Optional[str] = None, knowledge_model: Optional[str] = None) -> Optional[ProfilerUpdateSchema]:
     """Analyzes learner traits and conceptual mastery, updating the user graph (Farsi summaries)."""
     logger.log_process_start("Cognitive Profiler Agent", "Analyzing event logs for double-loop learning")
     start_time = time.time()
@@ -1030,7 +1067,7 @@ def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: s
     ])
 
     try:
-        llm = get_generator_llm()
+        llm = get_knowledge_llm(api_key, knowledge_model)
         structured_llm = llm.with_structured_output(ProfilerUpdateSchema, method="json_schema")
         chain = prompt_template | structured_llm
         
@@ -1058,7 +1095,7 @@ def run_cognitive_profiler(user_profile: str, current_state: str, recent_logs: s
         logger.log_process_end("Cognitive Profiler Agent", time.time() - start_time)
         return None
 
-def run_incremental_cognitive_profiler(user_profile: str, current_state: str, current_nodes: str, new_event: str) -> Optional[IncrementalProfilerUpdateSchema]:
+def run_incremental_cognitive_profiler(user_profile: str, current_state: str, current_nodes: str, new_event: str, api_key: Optional[str] = None, knowledge_model: Optional[str] = None) -> Optional[IncrementalProfilerUpdateSchema]:
     """Analyzes a single new learning event context to selectively append/refine cognitive details and concept masteries."""
     logger.log_process_start("Incremental Profiler Agent", "Evaluating single learning event delta")
     start_time = time.time()
@@ -1069,7 +1106,7 @@ def run_incremental_cognitive_profiler(user_profile: str, current_state: str, cu
     ])
 
     try:
-        llm = get_generator_llm()
+        llm = get_knowledge_llm(api_key, knowledge_model)
         structured_llm = llm.with_structured_output(IncrementalProfilerUpdateSchema, method="json_schema")
         chain = prompt_template | structured_llm
         
@@ -1102,7 +1139,7 @@ def run_incremental_cognitive_profiler(user_profile: str, current_state: str, cu
 # 4. IMAGE GENERATION SERVICES
 # ==========================================
 
-def generate_prompt_for_image(note_title: str, content_context: str) -> str:
+def generate_prompt_for_image(note_title: str, content_context: str, api_key: Optional[str] = None, content_model: Optional[str] = None) -> str:
     """
     Uses the content LLM and the IMAGE_SYSTEM_INSTRUCTION to translate course/session content
     into a concrete visual prompt description for the Imagen model.
@@ -1125,7 +1162,7 @@ Output ONLY the final image generation prompt in English, with no quotes or intr
         HumanMessage(content=user_prompt),
     ])
     
-    chain = prompt_template | get_generator_llm()
+    chain = prompt_template | get_content_llm(api_key, content_model)
     result = chain.invoke({})
     prompt = result.content
     if isinstance(prompt, list):
@@ -1136,23 +1173,22 @@ Output ONLY the final image generation prompt in English, with no quotes or intr
     logger.log_process_end("Image Prompt Translation", 0)
     return prompt
 
-def generate_image_cover(prompt_text: str) -> Optional[bytes]:
+def generate_image_cover(prompt_text: str, api_key: Optional[str] = None, image_model: Optional[str] = None) -> Optional[bytes]:
     """
     Generates a 16:9 cover image using the Google image generation model.
     Utilizes the new google-genai library and streams the generated content.
     """
     from google import genai
     from google.genai import types
-    from dotenv import load_dotenv
 
-    load_dotenv(override=True)
-    api_key = os.getenv("GOOGLE_IMAGE_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    resolved = _resolve_api_key(api_key)
+    api_key = resolved
     if not api_key:
-        logger.log_error("Image Generation: GOOGLE_IMAGE_API_KEY, GOOGLE_API_KEY or GEMINI_API_KEY is not set.")
+        logger.log_error("Image Generation: no API key available.")
         return None
 
     # Load model name from .env, defaulting to 'gemini-2.5-flash-image'
-    model_name = os.getenv("IMAGE_MODEL_NAME", "gemini-2.5-flash-image")
+    model_name = _resolve_model(image_model, "gemini-2.5-flash-image")
 
     logger.log_process_start("AI Image Generation", f"Generating image with model '{model_name}' and prompt: {prompt_text[:100]}...")
     start_time = time.time()

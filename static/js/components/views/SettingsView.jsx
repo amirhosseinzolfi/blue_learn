@@ -29,6 +29,14 @@ function SettingsView({ settings, setSettings, onSave, saved, currentUser, onLog
         </div>
     );
 
+    const sectionDivider = (label) => (
+        <div className="flex items-center gap-3 my-2">
+            <div className="h-px flex-1 bg-white/[0.04]" />
+            <span className="text-[10px] font-bold tracking-widest uppercase text-slate-500">{label}</span>
+            <div className="h-px flex-1 bg-white/[0.04]" />
+        </div>
+    );
+
     return (
         <div className="max-w-5xl mx-auto pb-10">
             <div className="bg-dark-lighter/60 backdrop-blur-2xl border border-white/[0.03] rounded-[2rem] shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col md:flex-row min-h-[550px]">
@@ -94,38 +102,47 @@ function SettingsView({ settings, setSettings, onSave, saved, currentUser, onLog
                                     </div>
                                     {inputField('education', 'تحصیلات یا حوزه کاری', 'text', 'مثال: دانشجوی مهندسی کامپیوتر', '', 'rtl')}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {textareaField('background_experience', 'تجربیات و مهارت‌ها', 'تخصص‌ها و علاقه‌مندی‌های خود را خلاصه بنویسید...')}
+                                        {textareaField('background_experience', 'تجربیات و مهارتها', 'تخصصها و علاقهمندیهای خود را خلاصه بنویسید...')}
                                         {textareaField('additional_info', 'نکات تکمیلی برای هوش مصنوعی', 'سبک یادگیری مورد علاقه یا اهداف خاص خود را مشخص کنید...')}
                                     </div>
                                 </div>
                             )}
 
                             {activeTab === 'ai' && (
-                                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                    <div className="mb-8">
+                                <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                    <div className="mb-6">
                                         <h3 className="text-xl font-bold text-white mb-2">تنظیمات موتور هوش مصنوعی</h3>
-                                        <p className="text-[13px] text-slate-400 leading-relaxed max-w-2xl">کلید دسترسی و مدل پردازشی مورد نظر برای تولید محتوا و تصاویر آموزشی را پیکربندی کنید.</p>
+                                        <p className="text-[13px] text-slate-400 leading-relaxed max-w-2xl">تمام تنظیمات زیر فقط برای حساب شما ذخیره میشوند و با سایر کاربران به اشتراک گذاشته نمیشوند.</p>
                                     </div>
-                                    <div className="space-y-6 max-w-xl">
-                                        {inputField('google_api_key', 'کلید دسترسی عمومی (Google API Key)', 'password', 'AIzaSy...', '', 'ltr')}
-                                        {inputField('model_name', 'مدل پردازشی متن (Gemini Text Model)', 'text', 'gemini-flash-latest', '', 'ltr')}
-                                        
-                                        <div className="h-px bg-white/[0.04] my-4" />
-                                        
-                                        {inputField('google_image_api_key', 'کلید دسترسی اختصاصی تصاویر (Google Image API Key - اختیاری)', 'password', 'اگر خالی بماند از کلید دسترسی عمومی استفاده می‌شود...', '', 'ltr')}
-                                        {inputField('image_model_name', 'مدل پردازشی تصویر (Gemini Image Model)', 'text', 'gemini-2.5-flash-image', '', 'ltr')}
-                                        
-                                        <div className="group flex items-start gap-4 mt-6">
+
+                                    <div className="space-y-5 max-w-xl">
+
+                                        {sectionDivider('کلیدهای دسترسی')}
+
+                                        {inputField('google_api_key', 'کلید Gemini API (Google AI)', 'password', 'AIzaSy...', 'برای تمام قابلیتهای متنی هوش مصنوعی استفاده میشود.', 'ltr')}
+                                        {inputField('image_api_key', 'کلید API اختصاصی تصویر (اختیاری)', 'password', 'اگر خالی باشد از کلید Gemini API بالا استفاده میشود...', '', 'ltr')}
+
+                                        {sectionDivider('مدلهای متنی')}
+
+                                        {inputField('content_model', 'مدل تولید محتوای دوره', 'text', 'gemini-flash-latest', 'برای نوشتن محتوای جلسات و سرفصلها استفاده میشود.', 'ltr')}
+                                        {inputField('coach_model', 'مدل مربی هوشمند', 'text', 'gemini-flash-latest', 'برای دستیار جلسه و مربی طراحی دوره استفاده میشود.', 'ltr')}
+                                        {inputField('knowledge_model', 'مدل پایگاه دانش', 'text', 'gemini-flash-lite-latest', 'برای بهروزرسانی پروفایل شناختی و گراف دانش استفاده میشود.', 'ltr')}
+
+                                        {sectionDivider('تولید تصویر')}
+
+                                        {inputField('image_model', 'مدل تولید تصویر', 'text', 'gemini-2.5-flash-image', 'مدل Gemini برای ساخت کاور جلسات و دورهها.', 'ltr')}
+
+                                        <div className="group flex items-start gap-4 mt-2 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.04]">
                                             <input
                                                 type="checkbox"
-                                                id="auto_generate_session_covers"
-                                                checked={settings.auto_generate_session_covers || false}
-                                                onChange={(e) => setSettings(s => ({ ...s, auto_generate_session_covers: e.target.checked }))}
+                                                id="auto_generate_covers"
+                                                checked={settings.auto_generate_covers || false}
+                                                onChange={(e) => setSettings(s => ({ ...s, auto_generate_covers: e.target.checked }))}
                                                 className="w-5 h-5 mt-0.5 rounded border-purple-900/50 bg-dark-lightest text-primary focus:ring-primary focus:ring-offset-dark-lighter transition-all"
                                             />
                                             <div>
-                                                <label htmlFor="auto_generate_session_covers" className="block text-[13px] font-bold text-slate-300 mb-1 cursor-pointer select-none">تولید خودکار تصویر جلسات با هوش مصنوعی</label>
-                                                <p className="text-[11px] text-slate-500 leading-relaxed">با فعال‌سازی این گزینه، به هنگام تألیف درس‌ها توسط هوش مصنوعی، کاور اختصاصی ۱۶:۹ نیز در ابتدای مطالب تولید و درج می‌گردد.</p>
+                                                <label htmlFor="auto_generate_covers" className="block text-[13px] font-bold text-slate-300 mb-1 cursor-pointer select-none">تولید خودکار تصویر کاور جلسات</label>
+                                                <p className="text-[11px] text-slate-500 leading-relaxed">با فعالسازی، هنگام تألیف هر جلسه توسط هوش مصنوعی، یک کاور ۱۶:۹ اختصاصی نیز تولید و درج میشود.</p>
                                             </div>
                                         </div>
                                     </div>

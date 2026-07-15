@@ -1,9 +1,7 @@
-import os
 import math
 import json
 import time
 from typing import List, Optional
-from dotenv import load_dotenv
 from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -11,15 +9,11 @@ from app.logger import logger
 
 class DynamicFallbackEmbeddings(Embeddings):
     """
-    Highly robust, custom implementation of the LangChain Embeddings interface.
-    Attempts to embed text using local Ollama nomic-embed-text embeddings.
-    If Ollama is not running, offline, or raises any connection error,
-    it seamlessly falls back to Google's cloud-based 'text-embedding-004' (or 'embedding-001')
-    using the active GOOGLE_API_KEY.
+    Attempts Ollama embeddings first; falls back to Google GenAI embeddings
+    using the user's API key if Ollama is unavailable.
     """
-    def __init__(self):
-        load_dotenv(override=True)
-        self.google_api_key = os.getenv("GOOGLE_API_KEY")
+    def __init__(self, google_api_key: Optional[str] = None):
+        self.google_api_key = google_api_key
         self.ollama_model = "nomic-embed-text-v2-moe:latest"
         self.google_model = "models/text-embedding-004"
 
@@ -62,9 +56,9 @@ class DynamicFallbackEmbeddings(Embeddings):
                 logger.log_error(f"Fallback Google GenAI embedding also failed: {str(e_inner)}")
                 raise e_inner
 
-def get_embeddings_model() -> Embeddings:
+def get_embeddings_model(google_api_key: Optional[str] = None) -> Embeddings:
     """Returns the unified dynamic fallback embedding model."""
-    return DynamicFallbackEmbeddings()
+    return DynamicFallbackEmbeddings(google_api_key=google_api_key)
 
 def calculate_cosine_similarity(v1: List[float], v2: List[float]) -> float:
     """Calculates the standard mathematical cosine similarity coefficient between two vector dimensions."""
@@ -75,7 +69,7 @@ def calculate_cosine_similarity(v1: List[float], v2: List[float]) -> float:
         return 0.0
     return dot_product / (mag1 * mag2)
 
-def semantic_search_logs(query: str, logs_with_vectors: List[dict], top_k: int = 3) -> str:
+def semantic_search_logs(query: str, logs_with_vectors: List[dict], top_k: int = 3, google_api_key: Optional[str] = None) -> str:
     """
     Performs standard, lightweight vector comparisons against all historical logs.
     Utilizes DynamicFallbackEmbeddings to obtain query representations.
@@ -84,7 +78,7 @@ def semantic_search_logs(query: str, logs_with_vectors: List[dict], top_k: int =
     start_time = time.time()
     
     try:
-        embedder = get_embeddings_model()
+        embedder = get_embeddings_model(google_api_key=google_api_key)
         query_vector = embedder.embed_query(query)
         
         scored_logs = []

@@ -74,15 +74,14 @@ def create_course(
     if course.generate_cover:
         logger.log_info(f"Requesting AI image generation for course cover: {db_course.title}")
         try:
-            # Create a textual representation of the course outline for context
+            _us = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
+            _api_key = _us.gemini_api_key if _us else None
             outline_context = "\n".join([f"- {ch.title}: " + ", ".join([s.title for s in ch.sessions]) for ch in course.chapters])
             context_text = f"Description: {course.course_description or ''}\nOutline:\n{outline_context}"
             
-            # Translate to a visual prompt
-            visual_prompt = agent_service.generate_prompt_for_image(db_course.title, context_text)
+            visual_prompt = agent_service.generate_prompt_for_image(db_course.title, context_text, api_key=_api_key, content_model=_us.content_model if _us else None)
             
-            # Generate the image using Google Imagen
-            img_bytes = agent_service.generate_image_cover(visual_prompt)
+            img_bytes = agent_service.generate_image_cover(visual_prompt, api_key=(_us.image_api_key or _api_key) if _us else _api_key, image_model=_us.image_model if _us else None)
             if img_bytes:
                 os.makedirs("static/images/covers", exist_ok=True)
                 file_path = f"static/images/covers/{db_course.id}.jpg"
@@ -412,8 +411,16 @@ def generate_random_micro(
 
     user_settings = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
     user_info = ""
+    user_api_key = None
+    user_content_model = None
+    user_image_model = None
+    user_image_api_key = None
     if user_settings:
         user_info = f"Name: {user_settings.name or 'N/A'}\nAge: {user_settings.age or 'N/A'}\nEducation: {user_settings.education or 'N/A'}\nExperience: {user_settings.background_experience or 'N/A'}\nAdditional Info: {user_settings.additional_info or 'N/A'}"
+        user_api_key = user_settings.gemini_api_key
+        user_content_model = user_settings.content_model
+        user_image_model = user_settings.image_model
+        user_image_api_key = user_settings.image_api_key
 
     # Generate content using dynamic agent service
     try:
@@ -439,15 +446,17 @@ def generate_random_micro(
         detailed_outline=detailed_outline,
         session_description=selected_item.description,
         session_learning_objectives=selected_lo,
-        session_key_concepts=selected_kc
+        session_key_concepts=selected_kc,
+        api_key=user_api_key,
+        content_model=user_content_model
     )
 
     if generate_cover:
         logger.log_info(f"Requesting AI image generation for session cover: {selected_item.title}")
         try:
             context_text = f"This is a session titled '{selected_item.title}' in the course '{course.title}' which covers: {course.description or ''}"
-            visual_prompt = agent_service.generate_prompt_for_image(selected_item.title, context_text)
-            img_bytes = agent_service.generate_image_cover(visual_prompt)
+            visual_prompt = agent_service.generate_prompt_for_image(selected_item.title, context_text, api_key=user_api_key, content_model=user_content_model)
+            img_bytes = agent_service.generate_image_cover(visual_prompt, api_key=user_image_api_key or user_api_key, image_model=user_image_model)
             if img_bytes:
                 os.makedirs("static/images/sessions", exist_ok=True)
                 file_path = f"static/images/sessions/{selected_item.id}.jpg"

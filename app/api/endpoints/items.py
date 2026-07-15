@@ -154,8 +154,16 @@ def generate_specific_micro(
         
     user_settings = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
     user_info = ""
+    user_api_key = None
+    user_content_model = None
+    user_image_model = None
+    user_image_api_key = None
     if user_settings:
         user_info = f"Name: {user_settings.name or 'N/A'}\nAge: {user_settings.age or 'N/A'}\nEducation: {user_settings.education or 'N/A'}\nExperience: {user_settings.background_experience or 'N/A'}\nAdditional Info: {user_settings.additional_info or 'N/A'}"
+        user_api_key = user_settings.gemini_api_key
+        user_content_model = user_settings.content_model
+        user_image_model = user_settings.image_model
+        user_image_api_key = user_settings.image_api_key
 
     try:
         item_lo = json.loads(item.learning_objectives) if item.learning_objectives else []
@@ -180,7 +188,9 @@ def generate_specific_micro(
         detailed_outline=detailed_outline,
         session_description=item.description,
         session_learning_objectives=item_lo,
-        session_key_concepts=item_kc
+        session_key_concepts=item_kc,
+        api_key=user_api_key,
+        content_model=user_content_model
     )
 
     if generate_cover:
@@ -188,8 +198,8 @@ def generate_specific_micro(
         try:
             import os
             context_text = f"This is a session titled '{item.title}' in the course '{course.title}' which covers: {course.description or ''}"
-            visual_prompt = agent_service.generate_prompt_for_image(item.title, context_text)
-            img_bytes = agent_service.generate_image_cover(visual_prompt)
+            visual_prompt = agent_service.generate_prompt_for_image(item.title, context_text, api_key=user_api_key, content_model=user_content_model)
+            img_bytes = agent_service.generate_image_cover(visual_prompt, api_key=user_image_api_key or user_api_key, image_model=user_image_model)
             if img_bytes:
                 os.makedirs("static/images/sessions", exist_ok=True)
                 file_path = f"static/images/sessions/{item.id}.jpg"

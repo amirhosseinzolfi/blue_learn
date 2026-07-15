@@ -132,8 +132,16 @@ class UserSettings(Base):
     education = Column(String, nullable=True)
     background_experience = Column(Text, nullable=True)
     additional_info = Column(Text, nullable=True)
+    # API keys (never written to .env)
     gemini_api_key = Column(String, nullable=True)
-    gemini_model = Column(String, nullable=True)
+    image_api_key = Column(String, nullable=True)
+    # Per-user model names
+    content_model = Column(String, nullable=True)    # course content generation
+    coach_model = Column(String, nullable=True)      # session coach + course gen coach
+    knowledge_model = Column(String, nullable=True)  # knowledge base / profiler AI
+    image_model = Column(String, nullable=True)      # image generation model
+    # Feature flags
+    auto_generate_covers = Column(Boolean, nullable=True, default=False)
 
     user = relationship("User", back_populates="user_settings")
 

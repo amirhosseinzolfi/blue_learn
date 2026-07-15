@@ -183,7 +183,11 @@ def generate_insight(
         for item in completed_items
     ]
 
-    insight_content = agent_service.generate_knowledge_insight(completed_sessions_data)
+    user_settings = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
+    user_api_key = user_settings.gemini_api_key if user_settings else None
+    user_content_model = user_settings.content_model if user_settings else None
+
+    insight_content = agent_service.generate_knowledge_insight(completed_sessions_data, api_key=user_api_key, content_model=user_content_model)
 
     new_insight = models.KnowledgeInsight(
         user_id=current_user.id,

@@ -1,7 +1,5 @@
-import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from dotenv import load_dotenv, set_key
 
 from app import models, database
 from app.schemas import SettingsSchema
@@ -9,36 +7,58 @@ from app.api.endpoints.auth import get_current_user
 
 router = APIRouter()
 
+DEFAULTS = {
+    "content_model":        "gemini-flash-latest",
+    "coach_model":          "gemini-flash-latest",
+    "knowledge_model":      "gemini-flash-lite-latest",
+    "image_model":          "gemini-2.5-flash-image",
+    "auto_generate_covers": False,
+}
+
+
+def _get_or_create_settings(db: Session, user: models.User) -> models.UserSettings:
+    us = db.query(models.UserSettings).filter(models.UserSettings.user_id == user.id).first()
+    if not us:
+        us = models.UserSettings(user_id=user.id, name=user.username)
+        db.add(us)
+        db.commit()
+        db.refresh(us)
+    return us
+
+
+@router.get("/settings/api-key-status")
+def api_key_status(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Returns whether the current user has a Gemini API key configured."""
+    us = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
+    has_key = bool(us and us.gemini_api_key and us.gemini_api_key.strip())
+    return {"has_api_key": has_key}
+
+
 @router.get("/settings")
 def get_settings(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """Retrieves current application settings from .env configurations and user_settings table."""
-    load_dotenv(override=True)
-    env_settings = {
-        "google_api_key": os.getenv("GOOGLE_API_KEY", ""),
-        "model_name": os.getenv("GENERATOR_MODEL_NAME", "gemini-flash-latest"),
-        "google_image_api_key": os.getenv("GOOGLE_IMAGE_API_KEY", ""),
-        "image_model_name": os.getenv("IMAGE_MODEL_NAME", "gemini-2.5-flash-image"),
-        "auto_generate_session_covers": os.getenv("AUTO_GENERATE_SESSION_COVERS", "false").lower() == "true"
-    }
-    
-    user_settings = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
-    if not user_settings:
-        user_settings = models.UserSettings(user_id=current_user.id, name=current_user.username)
-        db.add(user_settings)
-        db.commit()
-        db.refresh(user_settings)
-        
+    """Returns all per-user settings from DB (never from .env)."""
+    us = _get_or_create_settings(db, current_user)
     return {
-        **env_settings,
-        "name": user_settings.name or "",
-        "age": user_settings.age or "",
-        "education": user_settings.education or "",
-        "background_experience": user_settings.background_experience or "",
-        "additional_info": user_settings.additional_info or ""
+        "google_api_key":        us.gemini_api_key or "",
+        "image_api_key":         us.image_api_key or "",
+        "content_model":         us.content_model   or DEFAULTS["content_model"],
+        "coach_model":           us.coach_model     or DEFAULTS["coach_model"],
+        "knowledge_model":       us.knowledge_model or DEFAULTS["knowledge_model"],
+        "image_model":           us.image_model     or DEFAULTS["image_model"],
+        "auto_generate_covers":  us.auto_generate_covers if us.auto_generate_covers is not None else DEFAULTS["auto_generate_covers"],
+        "name":                  us.name or "",
+        "age":                   us.age or "",
+        "education":             us.education or "",
+        "background_experience": us.background_experience or "",
+        "additional_info":       us.additional_info or "",
     }
+
 
 @router.post("/settings")
 def update_settings(
@@ -46,60 +66,46 @@ def update_settings(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """Saves updated parameters to both local .env files and user settings tables."""
-    env_file = ".env"
-    if not os.path.exists(env_file):
-        with open(env_file, 'w') as f:
-            pass
-    
-    if settings_data.google_api_key is not None:
-        set_key(env_file, "GOOGLE_API_KEY", settings_data.google_api_key)
-    if settings_data.model_name is not None:
-        set_key(env_file, "GENERATOR_MODEL_NAME", settings_data.model_name)
-        set_key(env_file, "MAIN_MODEL_NAME", settings_data.model_name)
-        set_key(env_file, "COACH_MODEL_NAME", settings_data.model_name)
-    if settings_data.google_image_api_key is not None:
-        set_key(env_file, "GOOGLE_IMAGE_API_KEY", settings_data.google_image_api_key)
-    if settings_data.image_model_name is not None:
-        set_key(env_file, "IMAGE_MODEL_NAME", settings_data.image_model_name)
-    if settings_data.auto_generate_session_covers is not None:
-        val_str = "true" if settings_data.auto_generate_session_covers else "false"
-        set_key(env_file, "AUTO_GENERATE_SESSION_COVERS", val_str)
-        
-    user_settings = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
-    if not user_settings:
-        user_settings = models.UserSettings(user_id=current_user.id)
-        db.add(user_settings)
-        
+    """Saves all settings per-user in DB. Nothing is written to .env."""
+    us = _get_or_create_settings(db, current_user)
+
     user_profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == current_user.id).first()
     if not user_profile:
         user_profile = models.UserProfile(user_id=current_user.id)
         db.add(user_profile)
         db.commit()
         db.refresh(user_profile)
-        
-        cog_profile = models.CognitiveProfile(user_id=user_profile.id)
-        db.add(cog_profile)
-        
+        db.add(models.CognitiveProfile(user_id=user_profile.id))
+
+    if settings_data.google_api_key is not None:
+        us.gemini_api_key = settings_data.google_api_key
+    if settings_data.image_api_key is not None:
+        us.image_api_key = settings_data.image_api_key
+    if settings_data.content_model is not None:
+        us.content_model = settings_data.content_model
+    if settings_data.coach_model is not None:
+        us.coach_model = settings_data.coach_model
+    if settings_data.knowledge_model is not None:
+        us.knowledge_model = settings_data.knowledge_model
+    if settings_data.image_model is not None:
+        us.image_model = settings_data.image_model
+    if settings_data.auto_generate_covers is not None:
+        us.auto_generate_covers = settings_data.auto_generate_covers
     if settings_data.name is not None:
-        user_settings.name = settings_data.name
+        us.name = settings_data.name
         user_profile.name = settings_data.name
     if settings_data.age is not None:
-        user_settings.age = settings_data.age
+        us.age = settings_data.age
         user_profile.age = settings_data.age
     if settings_data.education is not None:
-        user_settings.education = settings_data.education
+        us.education = settings_data.education
         user_profile.education_level = settings_data.education
     if settings_data.background_experience is not None:
-        user_settings.background_experience = settings_data.background_experience
+        us.background_experience = settings_data.background_experience
         user_profile.background_experience = settings_data.background_experience
     if settings_data.additional_info is not None:
-        user_settings.additional_info = settings_data.additional_info
+        us.additional_info = settings_data.additional_info
         user_profile.additional_info = settings_data.additional_info
-    if settings_data.google_api_key is not None:
-        user_settings.gemini_api_key = settings_data.google_api_key
-    if settings_data.model_name is not None:
-        user_settings.gemini_model = settings_data.model_name
-        
+
     db.commit()
     return {"status": "success"}

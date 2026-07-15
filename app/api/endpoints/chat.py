@@ -23,8 +23,22 @@ def chat_course_generator_endpoint(
     
     user_settings = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
     user_info = ""
+    user_api_key = None
+    user_content_model = None
+    user_coach_model = None
+    user_knowledge_model = None
+    user_image_model = None
+    user_image_api_key = None
+    user_auto_covers = False
     if user_settings:
         user_info = f"Name: {user_settings.name or 'N/A'}\nAge: {user_settings.age or 'N/A'}\nEducation: {user_settings.education or 'N/A'}\nExperience: {user_settings.background_experience or 'N/A'}\nAdditional Info: {user_settings.additional_info or 'N/A'}"
+        user_api_key = user_settings.gemini_api_key
+        user_content_model = user_settings.content_model
+        user_coach_model = user_settings.coach_model
+        user_knowledge_model = user_settings.knowledge_model
+        user_image_model = user_settings.image_model
+        user_image_api_key = user_settings.image_api_key
+        user_auto_covers = bool(user_settings.auto_generate_covers)
         
     messages = [
         {
@@ -42,7 +56,10 @@ def chat_course_generator_endpoint(
         duration_sessions=request.duration_sessions,
         learning_style=request.learning_style,
         conversation_summary=request.conversation_summary,
-        profile=request.profile
+        profile=request.profile,
+        api_key=user_api_key,
+        content_model=user_content_model,
+        coach_model=user_coach_model
     )
     return result
 
@@ -117,8 +134,22 @@ def chat_coach_endpoint(
     
     user_settings = db.query(models.UserSettings).filter(models.UserSettings.user_id == current_user.id).first()
     user_info = ""
+    user_api_key = None
+    user_content_model = None
+    user_coach_model = None
+    user_knowledge_model = None
+    user_image_model = None
+    user_image_api_key = None
+    user_auto_covers = False
     if user_settings:
         user_info = f"Name: {user_settings.name or 'N/A'}\nAge: {user_settings.age or 'N/A'}\nEducation: {user_settings.education or 'N/A'}\nExperience: {user_settings.background_experience or 'N/A'}\nAdditional Info: {user_settings.additional_info or 'N/A'}"
+        user_api_key = user_settings.gemini_api_key
+        user_content_model = user_settings.content_model
+        user_coach_model = user_settings.coach_model
+        user_knowledge_model = user_settings.knowledge_model
+        user_image_model = user_settings.image_model
+        user_image_api_key = user_settings.image_api_key
+        user_auto_covers = bool(user_settings.auto_generate_covers)
         
     # Build semantic memory vectors dynamically, scoped to current user profile
     semantic_memory_context = ""
@@ -139,7 +170,7 @@ def chat_coach_endpoint(
                 pass
                 
         if logs_with_vectors:
-            semantic_memory_context = vector_service.semantic_search_logs(user_input, logs_with_vectors)
+            semantic_memory_context = vector_service.semantic_search_logs(user_input, logs_with_vectors, google_api_key=user_api_key)
 
     # Compile course details and summarized outline context for coach
     try:
@@ -177,10 +208,12 @@ def chat_coach_endpoint(
         course_goal=course.course_goal,
         learning_outcomes=learning_outcomes,
         prerequisites=prerequisites,
-        target_user=course.target_user_summary
+        target_user=course.target_user_summary,
+        api_key=user_api_key,
+        coach_model=user_coach_model
     )
     
-    def stream_wrapper():
+    def stream_wrapper(captured_api_key=user_api_key, captured_coach_model=user_coach_model):
         full_response = ""
         for chunk in generator:
             full_response += chunk
@@ -206,7 +239,7 @@ def chat_coach_endpoint(
                 messages_dict_to_summarize = [{"role": msg.role, "content": msg.content} for msg in msgs_to_summarize]
                 
                 logger.log_info(f"Triggering background summarization for {len(msgs_to_summarize)} old messages...")
-                new_summary = agent_service.generate_history_summary(messages_dict_to_summarize, course_db.chat_summary)
+                new_summary = agent_service.generate_history_summary(messages_dict_to_summarize, course_db.chat_summary, api_key=captured_api_key, coach_model=captured_coach_model)
                 course_db.chat_summary = new_summary
                 
                 for msg in msgs_to_summarize:

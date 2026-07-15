@@ -13,7 +13,7 @@ function App() {
     const [stats, setStats] = useState({ total_courses: 0, completed_courses: 0, total_sessions: 0, total_completed_sessions: 0, total_study_time: 0, recent_completed: [], activity_data: [] });
     const [insights, setInsights] = useState([]);
     const [isInsightLoading, setIsInsightLoading] = useState(false);
-    const [settings, setSettings] = useState({ google_api_key: '', model_name: '' });
+    const [settings, setSettings] = useState({ google_api_key: '', content_model: '', coach_model: '', knowledge_model: '', image_model: '' });
     const [settingsSaved, setSettingsSaved] = useState(false);
     const [loading, setLoading] = useState(false);
     const [loadingItemId, setLoadingItemId] = useState(null);
@@ -74,18 +74,20 @@ function App() {
         fetchCourses(); fetchStats(); fetchInsights();
         api.fetchSettings().then(d => {
             setSettings({
-                google_api_key: d.google_api_key || '',
-                model_name: d.model_name || 'gemini-flash-latest',
-                google_image_api_key: d.google_image_api_key || '',
-                image_model_name: d.image_model_name || 'gemini-2.5-flash-image',
-                auto_generate_session_covers: d.auto_generate_session_covers !== undefined ? d.auto_generate_session_covers : false,
-                name: d.name || '',
-                age: d.age || '',
-                education: d.education || '',
+                google_api_key:        d.google_api_key || '',
+                image_api_key:         d.image_api_key || '',
+                content_model:         d.content_model || 'gemini-flash-latest',
+                coach_model:           d.coach_model || 'gemini-flash-latest',
+                knowledge_model:       d.knowledge_model || 'gemini-flash-lite-latest',
+                image_model:           d.image_model || 'gemini-2.5-flash-image',
+                auto_generate_covers:  d.auto_generate_covers !== undefined ? d.auto_generate_covers : false,
+                name:                  d.name || '',
+                age:                   d.age || '',
+                education:             d.education || '',
                 background_experience: d.background_experience || '',
-                additional_info: d.additional_info || ''
+                additional_info:       d.additional_info || ''
             });
-            const autoGen = d.auto_generate_session_covers !== undefined ? d.auto_generate_session_covers : false;
+            const autoGen = d.auto_generate_covers !== undefined ? d.auto_generate_covers : false;
             setAutoGenerateSessionCovers(autoGen);
             localStorage.setItem('auto_generate_session_covers', autoGen ? 'true' : 'false');
         }).catch(console.error);
@@ -626,9 +628,9 @@ function App() {
                                 try {
                                     await api.saveSettings(settings);
                                     setSettingsSaved(true);
-                                    if (settings.auto_generate_session_covers !== undefined) {
-                                        setAutoGenerateSessionCovers(settings.auto_generate_session_covers);
-                                        localStorage.setItem('auto_generate_session_covers', settings.auto_generate_session_covers ? 'true' : 'false');
+                                    if (settings.auto_generate_covers !== undefined) {
+                                        setAutoGenerateSessionCovers(settings.auto_generate_covers);
+                                        localStorage.setItem('auto_generate_session_covers', settings.auto_generate_covers ? 'true' : 'false');
                                     }
                                     setTimeout(() => setSettingsSaved(false), 3000);
                                 } catch (err) {
